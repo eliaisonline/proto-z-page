@@ -120,6 +120,7 @@
       <button id="simBoostBtn" class="btn-mock" style="display:none;">Simula stimolo (40 s)</button>
       <button id="endBtn" class="btn-secondary">Chiudi sessione</button>
       <label class="small"><input type="checkbox" id="wakeChk" checked> Schermo sempre acceso</label>
+      <label class="small"><input type="checkbox" id="accChk" checked> Accelerometro acceso (movimento e orientamento del braccio)</label>
       <span id="wakeNote" class="small" style="color:#fbbf24;"></span>
     </div>
     <div class="controls-bar">
@@ -952,7 +953,7 @@ const PMD_CONTROL_POINT = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
 const PMD_DATA = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
 const EVENTS_KEY = 'polar_body_diary_events_v13';
 const RECORDING_FORMAT = 'body-activated-diary/ppi-recording';
-const COLUMNS = ['ts', 'ppi', 'hr', 'err', 'flags'];
+const COLUMNS = ['ts', 'ppi', 'hr', 'err', 'flags', 'fts', 'late', 'mov', 'ax', 'ay', 'az'];
 
 const $ = id => document.getElementById(id);
 const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
@@ -1118,10 +1119,10 @@ function buildPayload(meta, rows) {
   const from = meta.startedAt, to = (meta.lastTs || meta.startedAt) + 1000;
   const events = loadEvents().filter(e => { const t = new Date(e.timestamp).getTime(); return t >= from - 1000 && t <= to; });
   return {
-    format: RECORDING_FORMAT, format_version: 2, engine_version: ENGINE_VERSION,
+    format: RECORDING_FORMAT, format_version: 3, engine_version: ENGINE_VERSION,
     session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device,
     config: engine.config, columns: COLUMNS,
-    note: 'flags is the raw Polar byte: bit0 = blocker (movement), bit1 = skin contact, bit2 = skin contact supported. ts in ms, estimated back from the arrival time of each Bluetooth packet. Format 2 adds kind and data to markers (kind: manual, phase, stimulus, checkin, system).',
+    note: 'flags is the raw Polar byte: bit0 = blocker (movement), bit1 = skin contact, bit2 = skin contact supported. ts in ms, estimated back from the arrival time of each Bluetooth packet. Format 2 adds kind and data to markers (kind: manual, phase, stimulus, checkin, system). Format 3 adds: fts = the sensor clock written in the packet header (ms since 2000-01-01, same value for all beats of a packet); late = 1 for beats that arrived in a burst after a stall (their ts is not reliable, the engine did not use them); mov = standard deviation of the acceleration magnitude over the last 2 s before the packet arrived, in milli-g (null = accelerometer off); ax, ay, az = mean acceleration in milli-g over the same window (arm orientation).',
     samples: rows, markers: meta.markers || [], events
   };
 }
@@ -1177,8 +1178,10 @@ async function renderSessions() {
 function parsePpiFrame(dv) {
   if (dv.byteLength < 10 || dv.getUint8(0) !== 0x03) return [];
   const rows = [];
+  let fts = null;
+  try { fts = Number(dv.getBigUint64(1, true) / 1000000n); } catch (e) { /* no BigInt: leave null */ }
   for (let off = 10; off + 6 <= dv.byteLength; off += 6) {
-    rows.push({ hr: dv.getUint8(off), ppi: dv.getUint16(off + 1, true), err: dv.getUint16(off + 3, true), flags: dv.getUint8(off + 5) });
+    rows.push({ hr: dv.getUint8(off), ppi: dv.getUint16(off + 1, true), err: dv.getUint16(off + 3, true), flags: dv.getUint8(off + 5), fts });
   }
   return rows;
 }
@@ -1190,16 +1193,34 @@ function stampBatch(rows, rx) {
   for (const r of rows) { if (lastStampTs !== null && r.ts <= lastStampTs) r.ts = lastStampTs + 1; lastStampTs = r.ts; }
 }
 
+let lastFrameRx = null, lateRun = 0;
+
 function onPpiNotification(dv) {
   const rows = parsePpiFrame(dv);
   if (!rows.length) return;
-  stampBatch(rows, Date.now());
+  const rx = Date.now();
+  // A normal packet comes every few seconds. Packets closer than 0.4 s, or the first one after more than 15 s of silence,
+  // are a backlog delivered in a burst: the arrival time says nothing about when the beats happened.
+  const late = lastFrameRx !== null && (rx - lastFrameRx < 400 || rx - lastFrameRx > 15000);
+  lastFrameRx = rx;
+  stampBatch(rows, rx);
+  const a = accNow(rx);
+  for (const r of rows) {
+    r.late = late;
+    if (a) { r.mov = a.mov; r.ax = a.ax; r.ay = a.ay; r.az = a.az; }
+  }
   ingestRows(rows);
 }
 
 function ingestRows(rows) {
   for (const r of rows) {
-    rec.rows.push([r.ts, r.ppi, r.hr, r.err, r.flags]);
+    rec.rows.push([r.ts, r.ppi, r.hr, r.err, r.flags, r.fts == null ? null : r.fts, r.late ? 1 : 0, r.mov == null ? null : r.mov, r.ax == null ? null : r.ax, r.ay == null ? null : r.ay, r.az == null ? null : r.az]);
+    if (r.late) {
+      if (lateRun === 0) log('Battiti arrivati in blocco dopo una pausa del collegamento: registrati ma non usati dal motore.');
+      lateRun++;
+      continue;
+    }
+    lateRun = 0;
     handleOutputs(engine.ingest({ ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err, blocker: (r.flags & 1) === 1 }));
   }
   refresh();
@@ -1220,15 +1241,53 @@ async function openGatt(device) {
   // answers of the control point are read only while a capability check is waiting for one
   control.addEventListener('characteristicvaluechanged', e => {
     if (!diag.waiting) return;
-    const v = e.target.value, w = diag.waiting; diag.waiting = null;
-    w(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)));
+    const v = e.target.value;
+    const u8 = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+    const ex = diag.expect;   // only the answer to the command that is waiting (not the one to the PPI start)
+    if (ex && !(u8[0] === 0xF0 && u8[1] === ex[0] && (ex[0] === 6 || u8[2] === ex[1]))) return;
+    const w = diag.waiting; diag.waiting = null;
+    w(u8);
   });
   pmdControl = control; btServer = server;
+  accLive.on = false; accLive.ring = []; lastFrameRx = null;
   await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
+  if (store.get(ACC_KEY, true)) {
+    try { await new Promise(r => setTimeout(r, 800)); await setAcc(true); }
+    catch (err) { log('Accelerometro non avviato: ' + err.message); }
+  }
 }
 
 // ---------------------------------------------------------------- accelerometer test (30 s, alongside the PPI stream; nothing is stored except the summary)
-const acc = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };   // samples: [t_ms, x, y, z] in milli-g
+const acc = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };
+const accLive = { on: false, ring: [] };   // always-on accelerometer: the last few seconds of samples
+const ACC_KEY = 'bad_acc_v13';
+const ACC_START = [0x02, 0x02, 0x00, 0x01, 0x34, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x08, 0x00, 0x04, 0x01, 0x03];   // 52 Hz, 16 bit, 8 g, 3 axes
+
+// Movement and arm orientation over the last 2 s before time t. null if the accelerometer is off or silent.
+function accNow(t) {
+  if (!accLive.on) return null;
+  const w = accLive.ring.filter(x => x[0] > t - 2000 && x[0] <= t);
+  if (w.length < 20) return null;
+  const mag = w.map(x => Math.hypot(x[1], x[2], x[3])), m = mag.reduce((p, c) => p + c, 0) / mag.length;
+  const sd = Math.sqrt(mag.reduce((p, c) => p + (c - m) * (c - m), 0) / mag.length);
+  const mean = i => Math.round(w.reduce((p, c) => p + c[i], 0) / w.length);
+  return { mov: Math.round(sd), ax: mean(1), ay: mean(2), az: mean(3) };
+}
+
+async function setAcc(on) {
+  if (!pmdControl || diag.running) return;
+  if (on) {
+    if (accLive.on) return;
+    const r = await pmdCommand(ACC_START, 4000);
+    accLive.on = !!(r.raw && (r.raw[3] === 0 || r.raw[3] === 6));
+    log(accLive.on ? 'Accelerometro acceso (52 Hz): movimento e orientamento del braccio entrano nei dati.' : 'Accelerometro non avviato. ' + describeReply('Risposta', r));
+  } else {
+    accLive.on = false; accLive.ring = [];
+    await pmdCommand([0x03, 0x02], 3000);
+    log('Accelerometro spento.');
+  }
+  refresh();
+}   // samples: [t_ms, x, y, z] in milli-g
 
 function signedLE(u8, o, size) {
   let v = 0; for (let j = size - 1; j >= 0; j--) v = v * 256 + u8[o + j];
@@ -1271,7 +1330,7 @@ function parseAccFrame(dv) {
 }
 
 function onAccFrame(dv) {
-  if (!acc.active || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 2) return;
+  if ((!acc.active && !accLive.on) || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 2) return;
   const r = parseAccFrame(dv);
   const now = Date.now();
   acc.frames++;
@@ -1279,7 +1338,16 @@ function onAccFrame(dv) {
   if (!r || !r.samples) { acc.bad++; return; }
   acc.types[r.ft] = (acc.types[r.ft] || 0) + 1;
   const n = r.samples.length;
-  r.samples.forEach((sm, i) => acc.samples.push([now - Math.round((n - 1 - i) * 1000 / 52), sm[0], sm[1], sm[2]]));
+  r.samples.forEach((sm, i) => {
+    const row = [now - Math.round((n - 1 - i) * 1000 / 52), sm[0], sm[1], sm[2]];
+    if (acc.active) acc.samples.push(row);
+    if (accLive.on) accLive.ring.push(row);
+  });
+  if (accLive.on) {
+    const cut = now - 6000;
+    let k = 0; while (k < accLive.ring.length && accLive.ring[k][0] < cut) k++;
+    if (k) accLive.ring.splice(0, k);
+  }
 }
 
 async function runAccTest() {
@@ -1291,8 +1359,9 @@ async function runAccTest() {
   const out = $('capOut'); out.style.display = ''; out.textContent = 'Test accelerometro: avvio...';
   const rowsBefore = rec.rows.length, t0 = Date.now();
   const lines = [`Test accelerometro | ${new Date().toLocaleString()} | ${btDevice ? btDevice.name : '?'}`];
-  const start = await pmdCommand([0x02, 0x02, 0x00, 0x01, 0x34, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x08, 0x00, 0x04, 0x01, 0x03], 4000);
-  lines.push(describeReply('Avvio accelerometro (52 Hz, 16 bit, 8 g, 3 assi)', start));
+  const already = accLive.on;
+  const start = already ? { raw: [0xF0, 2, 2, 0, 0] } : await pmdCommand(ACC_START, 4000);
+  lines.push(already ? 'Accelerometro già acceso (modalità continua).' : describeReply('Avvio accelerometro (52 Hz, 16 bit, 8 g, 3 assi)', start));
   const startedOk = start.raw && start.raw[3] === 0;
   if (startedOk) {
     for (let s = 0; s < SECS; s++) {
@@ -1300,7 +1369,7 @@ async function runAccTest() {
       out.textContent = `Test accelerometro: ${SECS - s} s. ${phase}.`;
       await new Promise(r => setTimeout(r, 1000));
     }
-    lines.push(describeReply('Stop accelerometro', await pmdCommand([0x03, 0x02], 3000)));
+    if (!already) lines.push(describeReply('Stop accelerometro', await pmdCommand([0x03, 0x02], 3000)));
   }
   acc.active = false;
   const rowsDuring = rec.rows.slice(rowsBefore);
@@ -1336,6 +1405,7 @@ const PMD_STATUS = { 0: 'ok', 1: 'invalid op code', 2: 'invalid measurement type
 
 function pmdCommand(bytes, timeoutMs) {
   return new Promise(resolve => {
+    diag.expect = [bytes[0], bytes.length > 1 ? bytes[1] : null];
     const t = setTimeout(() => { diag.waiting = null; resolve({ timeout: true }); }, timeoutMs || 3000);
     diag.waiting = r => { clearTimeout(t); resolve({ raw: r }); };
     pmdControl.writeValueWithResponse(new Uint8Array(bytes)).catch(err => { clearTimeout(t); diag.waiting = null; resolve({ error: err.message }); });
@@ -1442,7 +1512,7 @@ async function connect() {
     log(`Device selected: ${device.name}`);
     btDevice = device; wantConnected = true; reconnectTries = 0;
     device.addEventListener('gattserverdisconnected', () => {
-      connected = false; $('connectBtn').disabled = false;
+      connected = false; $('connectBtn').disabled = false; accLive.on = false; accLive.ring = [];
       flushRecording();
       if (wantConnected) {
         addMarker('sensor:disconnected', 'system');
@@ -1531,7 +1601,8 @@ function refresh() {
   }
   if (rec.id !== null) {
     $('recText').textContent = `Recording: ${rec.rows.length} samples since ${new Date(rec.startedAt).toLocaleTimeString()} · ${rec.markers.length} marker${rec.markers.length === 1 ? '' : 's'} · ` +
-      (rec.db ? 'saved in this browser every 15 s' : 'in memory only, export before closing');
+      (rec.db ? 'saved in this browser every 15 s' : 'in memory only, export before closing') +
+      (connected ? ` · accelerometro ${accLive.on ? (() => { const a = accNow(Date.now()); return a ? (a.mov >= 40 ? `movimento (${a.mov} mG)` : `fermo (${a.mov} mG)`) : 'acceso, in attesa di dati'; })() : 'spento'}` : '');
   }
 }
 
@@ -1550,7 +1621,8 @@ function samplesFromPayload(p) {
   if (!Array.isArray(raw) || !raw.length) throw new Error('No samples found in this file.');
   const cols = (p && Array.isArray(p.columns)) ? p.columns : COLUMNS;
   const ix = k => cols.indexOf(k);
-  return raw.map(r => {
+  const lateIx = cols.indexOf('late');
+  return raw.filter(r => !(Array.isArray(r) && lateIx >= 0 && r[lateIx] === 1)).map(r => {
     if (Array.isArray(r)) {
       const flags = ix('flags') >= 0 ? r[ix('flags')] : 0;
       return { ts: r[ix('ts')], ppi: r[ix('ppi')], hr: r[ix('hr')], err: ix('err') >= 0 ? r[ix('err')] : null, blocker: (flags & 1) === 1 };
@@ -2092,6 +2164,8 @@ function initV13() {
   initContext();
   $('capBtn').onclick = checkCapabilities;
   $('accBtn').onclick = runAccTest;
+  $('accChk').checked = store.get(ACC_KEY, true);
+  $('accChk').onchange = () => { store.set(ACC_KEY, $('accChk').checked); if (connected) setAcc($('accChk').checked).catch(err => log('Accelerometro: ' + err.message)); };
   $('capCopyBtn').onclick = async () => { try { await navigator.clipboard.writeText($('capOut').textContent); log('Testo copiato.'); } catch (e) { log('Copia non riuscita: seleziona il testo a mano.'); } };
   setInterval(protoTick, 250);
 
