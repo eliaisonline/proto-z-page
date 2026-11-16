@@ -178,6 +178,7 @@
       <div class="row">
         <button id="capBtn" class="btn-secondary" type="button">Controlla il sensore</button>
         <button id="accBtn" class="btn-secondary" type="button">Prova accelerometro (30 s)</button>
+        <button id="ppgBtn" class="btn-secondary" type="button">Prova PPG grezzo (30 s)</button>
         <button id="capCopyBtn" class="btn-secondary btn-small" type="button" style="display:none;">Copia</button>
       </div>
       <pre id="capOut" class="small" style="display:none; white-space:pre-wrap; word-break:break-word; margin-top:0.5rem;"></pre>
@@ -1240,6 +1241,7 @@ async function openGatt(device) {
   await data.startNotifications();
   data.addEventListener('characteristicvaluechanged', e => onPpiNotification(e.target.value));
   data.addEventListener('characteristicvaluechanged', e => onAccFrame(e.target.value));
+  data.addEventListener('characteristicvaluechanged', e => onPpgFrame(e.target.value));
   await control.startNotifications();
   // answers of the control point are read only while a capability check is waiting for one
   control.addEventListener('characteristicvaluechanged', e => {
@@ -1403,6 +1405,118 @@ async function runAccTest() {
   out.textContent = text; $('capCopyBtn').style.display = '';
   addMarker('sensor:acc_test', 'system', { text });
   log('Test accelerometro finito (salvato anche nella registrazione).');
+  syncSoon();
+}
+
+// ---------------------------------------------------------------- raw PPG test (30 s, alongside PPI and accelerometer; only a summary and a short excerpt are stored)
+// Verity Sense in normal mode: 55 Hz, 22 bit, 4 channels (3 PPG + 1 ambient). Frame type 0 = 4 x 24-bit signed samples; bit 7 of the frame type = delta compressed.
+const ppg = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };   // samples: [t_ms, c0, c1, c2, c3]
+const PPG_START = [0x02, 0x01, 0x00, 0x01, 0x37, 0x00, 0x01, 0x01, 0x16, 0x00, 0x04, 0x01, 0x04];   // 55 Hz, 22 bit, 4 channels
+
+function parsePpgFrame(dv) {
+  if (dv.byteLength < 11) return null;
+  const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const ft = u8[9], comp = (ft & 0x80) !== 0, type = ft & 0x7f;
+  if (type !== 0) return { ft, samples: null };   // other frame types are counted, not decoded
+  const CH = 4, SIZE = 3, body = u8.subarray(10), out = [];
+  if (!comp) {
+    for (let o = 0; o + CH * SIZE <= body.length; o += CH * SIZE) { const s = []; for (let c = 0; c < CH; c++) s.push(signedLE(body, o + c * SIZE, SIZE)); out.push(s); }
+    return { ft, samples: out };
+  }
+  if (body.length < CH * SIZE) return { ft, samples: null };
+  const ref = []; for (let c = 0; c < CH; c++) ref.push(signedLE(body, c * SIZE, SIZE));
+  out.push(ref);
+  let off = CH * SIZE;
+  while (off + 1 < body.length) {
+    const w = body[off++], n = body[off++], bits = n * w * CH, len = Math.ceil(bits / 8);
+    if (w === 0 || off + len > body.length) break;
+    let bit = 0;
+    for (let k = 0; k < n; k++) {
+      const prev = out[out.length - 1], cur = [];
+      for (let ch = 0; ch < CH; ch++) {
+        let v = 0;
+        for (let i = 0; i < w; i++, bit++) if (body[off + (bit >> 3)] & (1 << (bit & 7))) v |= (1 << i);
+        if (v & (1 << (w - 1))) v -= (1 << w);
+        cur.push(prev[ch] + v);
+      }
+      out.push(cur);
+    }
+    off += len;
+  }
+  return { ft, samples: out };
+}
+
+function onPpgFrame(dv) {
+  if (!ppg.active || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 1) return;
+  const r = parsePpgFrame(dv);
+  const now = Date.now();
+  ppg.frames++;
+  if (!ppg.firstHex) ppg.firstHex = hexOf(new Uint8Array(dv.buffer, dv.byteOffset, Math.min(dv.byteLength, 24)));
+  if (!r) { ppg.bad++; return; }
+  ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1;
+  if (!r.samples) { ppg.bad++; return; }
+  const n = r.samples.length;
+  r.samples.forEach((sm, i) => ppg.samples.push([now - Math.round((n - 1 - i) * 1000 / 55), sm[0], sm[1], sm[2], sm[3]]));
+}
+
+async function runPpgTest() {
+  if (ppg.active || acc.active || diag.running) return;
+  if (!connected || !pmdControl) { log('Collega prima il sensore.'); return; }
+  const SECS = 30;
+  diag.running = true; $('ppgBtn').disabled = true; $('accBtn').disabled = true; $('capBtn').disabled = true;
+  const out = $('capOut'); out.style.display = ''; out.textContent = 'Test PPG grezzo: avvio...';
+  const lines = [`Test PPG grezzo | ${new Date().toLocaleString()} | ${btDevice ? btDevice.name : '?'}`];
+  try {
+    // the accelerometer is normally on already; the test checks the three streams together
+    diag.running = false;
+    if (!accLive.on) { try { await setAcc(true); } catch (e) { /* reported below */ } }
+    diag.running = true;
+    lines.push(accLive.on ? 'Accelerometro acceso (modalità continua).' : 'Accelerometro NON acceso: la convivenza a tre non è verificata.');
+    ppg.frames = 0; ppg.firstHex = null; ppg.types = {}; ppg.bad = 0; ppg.samples = [];
+    acc.frames = 0; acc.types = {}; acc.bad = 0; acc.samples = []; acc.firstHex = null;
+    const rowsBefore = rec.rows.length, t0 = Date.now();
+    const start = await pmdCommand(PPG_START, 4000);
+    lines.push(describeReply('Avvio PPG (55 Hz, 22 bit, 4 canali)', start));
+    const startedOk = start.raw && (start.raw[3] === 0 || start.raw[3] === 6);
+    if (startedOk) {
+      ppg.active = true; acc.active = true;
+      for (let s = 0; s < SECS; s++) {
+        out.textContent = `Test PPG grezzo: ${SECS - s} s. Braccio fermo, sensore addosso come sempre.`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      ppg.active = false; acc.active = false;
+      lines.push(describeReply('Stop PPG', await pmdCommand([0x03, 0x01], 3000)));
+      const sm = ppg.samples, rowsDuring = rec.rows.slice(rowsBefore);
+      const valid = rowsDuring.filter(r => !(r[4] & 1) && r[3] <= 30).length;
+      lines.push(`Frame PPG ricevuti: ${ppg.frames} (non letti: ${ppg.bad}) | tipi di frame (byte): ${Object.keys(ppg.types).map(k => '0x' + Number(k).toString(16) + ' x' + ppg.types[k]).join(', ') || 'nessuno'}`);
+      lines.push(`Campioni PPG: ${sm.length} in ${SECS} s = ${(sm.length / SECS).toFixed(1)} al secondo (atteso 55)`);
+      if (ppg.firstHex) lines.push(`Primo frame PPG (inizio): ${ppg.firstHex}`);
+      ['canale 0', 'canale 1', 'canale 2', 'ambiente (canale 3)'].forEach((name, c) => {
+        const v = sm.map(x => x[c + 1]);
+        if (v.length < 60) { lines.push(`${name}: pochi campioni`); return; }
+        const mean = v.reduce((p, q) => p + q, 0) / v.length;
+        // pulse amplitude proxy: peak-to-peak of the 1 s moving average removed signal, median over 1 s windows
+        const win = 55, ptp = [];
+        for (let i = 0; i + win <= v.length; i += win) {
+          const w = v.slice(i, i + win), m = w.reduce((p, q) => p + q, 0) / w.length, d = w.map(x => x - m);
+          ptp.push(Math.max(...d) - Math.min(...d));
+        }
+        ptp.sort((a, b) => a - b);
+        lines.push(`${name}: media ${Math.round(mean)}, min ${Math.min(...v)}, max ${Math.max(...v)}, ampiezza picco-picco per secondo (mediana) ${Math.round(ptp[Math.floor(ptp.length / 2)])}`);
+      });
+      lines.push(`Accelerometro nello stesso tempo: ${acc.samples.length} campioni = ${(acc.samples.length / SECS).toFixed(1)} al secondo (atteso 52), frame non letti ${acc.bad}`);
+      lines.push(`Intervalli PPI arrivati nel frattempo: ${rowsDuring.length} (validi ${valid}) in ${SECS} s`);
+      // a short raw excerpt (first 3 s, all 4 channels) so the signal shape can be checked offline
+      const ex = sm.slice(0, 165);
+      addMarker('sensor:ppg_excerpt', 'system', { rate_hz: 55, channels: 4, order: 'c0,c1,c2,ambient', samples: ex.map(x => x.slice(1)) });
+    }
+  } catch (e) { lines.push('Test interrotto: ' + e.message); }
+  ppg.active = false; acc.active = false;
+  diag.running = false; diag.waiting = null; $('ppgBtn').disabled = false; $('accBtn').disabled = false; $('capBtn').disabled = false;
+  const text = lines.join('\n');
+  out.textContent = text; $('capCopyBtn').style.display = '';
+  addMarker('sensor:ppg_test', 'system', { text });
+  log('Test PPG grezzo finito (salvato anche nella registrazione).');
   syncSoon();
 }
 
@@ -2172,6 +2286,7 @@ function initV13() {
   initContext();
   $('capBtn').onclick = checkCapabilities;
   $('accBtn').onclick = runAccTest;
+  $('ppgBtn').onclick = runPpgTest;
   $('accChk').checked = store.get(ACC_KEY, true);
   $('accChk').onchange = () => { store.set(ACC_KEY, $('accChk').checked); if (connected) setAcc($('accChk').checked).catch(err => log('Accelerometro: ' + err.message)); };
   $('capCopyBtn').onclick = async () => { try { await navigator.clipboard.writeText($('capOut').textContent); log('Testo copiato.'); } catch (e) { log('Copia non riuscita: seleziona il testo a mano.'); } };
