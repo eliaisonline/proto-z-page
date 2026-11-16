@@ -80,6 +80,8 @@
     .proto-clock { font-size: 3rem; font-weight: 800; color: #38bdf8; font-variant-numeric: tabular-nums; }
     .proto-text { font-size: 1rem; line-height: 1.5; color: #cbd5e1; }
     #pacer { width: 90px; height: 90px; border-radius: 50%; background: #0284c7; margin: 0.5rem auto; animation: breathe 10s ease-in-out infinite; }
+    @keyframes tempo { 0% { opacity: 1; transform: scale(1.15); } 18% { opacity: 0.12; transform: scale(0.8); } 100% { opacity: 0.12; transform: scale(0.8); } }
+    #tempoDot { width: 56px; height: 56px; border-radius: 50%; background: #f59e0b; margin: 0.5rem auto; animation: tempo 4s linear infinite; }
     @keyframes breathe { 0%, 100% { transform: scale(0.55); opacity: 0.6; } 50% { transform: scale(1.5); opacity: 1; } }
     .two { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
     .field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: #94a3b8; }
@@ -133,6 +135,16 @@
         <span id="protoStatus" class="tag" style="background:#1e293b; color:#cbd5e1;">Non avviata</span>
       </div>
       <div class="small">Una sequenza di riposo, respirazione, in piedi, calcolo a mente, suono improvviso e camminata, con pause in mezzo (<span id="protoTotal"></span>). I marker di ogni fase entrano da soli nella registrazione. Sensore sul braccio, meglio la parte alta, e non digitare durante le fasi da seduto. Ripetila 2 o 3 volte nella giornata, per esempio prima e dopo il caffè.</div>
+      <div id="ctxBox" class="two" style="margin: 0.5rem 0;">
+        <label class="field">Dove hai il sensore<select id="ctxPlace"></select></label>
+        <label class="field">Caffè o altro stimolante<select id="ctxCaf"></select></label>
+        <label class="field">Sonno della scorsa notte<select id="ctxSleep"></select></label>
+        <label class="field">Il suono di prova, come lo senti<select id="ctxVol"></select></label>
+      </div>
+      <div class="row" style="margin-bottom:0.5rem;">
+        <button id="volTestBtn" class="btn-secondary btn-small" type="button">Prova il volume (un tono)</button>
+        <label class="small"><input id="cueSilent" type="checkbox" checked> Segnali di fase solo con vibrazione</label>
+      </div>
       <div class="row">
         <input id="protoNote" type="text" placeholder="Nota (es. dopo il caffè)" style="flex:1; min-width: 180px;">
         <button id="protoStartBtn" class="btn-primary">Avvia percorso</button>
@@ -141,11 +153,16 @@
         <div id="protoStep" class="small"></div>
         <div id="protoTitle" class="proto-title"></div>
         <div id="pacer" style="display:none;"></div>
+        <div id="tempoDot" style="display:none;"></div>
         <div id="protoText" class="proto-text"></div>
         <div id="protoClock" class="proto-clock"></div>
+        <div id="rateRow" style="display:none; margin:0.5rem 0;">
+          <div id="rateLbl" class="small"></div>
+          <div id="rateBtns" class="row" style="justify-content:center;"></div>
+        </div>
         <div class="progress-bar-bg"><div id="protoBar" class="progress-bar-fill"></div></div>
         <div class="row" style="justify-content:center; margin-top:0.75rem;">
-          <button id="feltBtn" class="btn-mock" style="display:none;">Mi sono spaventato</button>
+          <button id="feltBtn" class="btn-mock" style="display:none;">Mi sono spaventato (con l'altra mano)</button>
           <button id="protoSkipBtn" class="btn-secondary btn-small">Salta fase</button>
           <button id="protoStopBtn" class="btn-danger btn-small">Interrompi</button>
         </div>
@@ -352,7 +369,7 @@
 // what happened (events, event updates, log lines). Time comes only from the
 // sample timestamps, so the same code runs live and on a recording (replay).
 // ============================================================================
-const ENGINE_VERSION = '1.3';
+const ENGINE_VERSION = '1.3.1';
 
 // All values are starting points, not validated thresholds.
 const DEFAULT_CONFIG = {
@@ -388,6 +405,12 @@ const DEFAULT_CONFIG = {
   PHASIC_MIN_S: 8,                  // v1.3: the strict thresholds must hold this long (on valid samples) before a phasic
                                     // trigger. 0 = on one sample (v1.1, v1.2). A first value, to tune with labelled data.
 
+  // --- Movement context (v1.3, hypothesis from 5 candidate triggers on one person, not validated)
+  MOVEMENT_CONTEXT: 'tag',          // 'tag' = a trigger preceded by a lot of movement is kept in the log but marked
+                                    // (context 'movement', notify false: no chime, no invite). 'off' = every trigger notifies (v1.1 to v1.3 first build).
+  MOVEMENT_WINDOW_S: 20,            // look-back before the trigger
+  MOVEMENT_BLOCKED_FRACTION: 0.15,  // share of samples in the window with the sensor's movement bit
+
   // --- Pathway 2: tonic
   TONIC_DROP_PERCENT: 0.30,
   TONIC_BPM_RISE: 5,
@@ -422,6 +445,7 @@ const V1_1_COMPAT_CONFIG = {
   RMSSD_MAX_SPAN_S: null,
   BPM_FROM_PPI: false,
   PHASIC_MIN_S: 0,
+  MOVEMENT_CONTEXT: 'off',
   FREEZE_BASELINE_WHILE_ELEVATED: false,
   REARM_AFTER_RELEASE: false,
   PHASIC_MAX_ONSET_S: null,
@@ -473,6 +497,7 @@ function createEngine(userConfig) {
     baseRmssdHist: [], baseBpmHist: [], baseRmssd: 0, baseBpm: 0,
     monitoring: false, cooldownUntil: 0,
     elevatedSince: null, tonicSeconds: 0, needRelease: false,
+    moveRing: [],
     ans: 'BALANCED',
     tracking: null,
     // quiet pathway
@@ -522,11 +547,25 @@ function createEngine(userConfig) {
     }, extra || {});
   }
 
+  function movementShare() {
+    if (!st.moveRing.length) return 0;
+    let b = 0;
+    for (const r of st.moveRing) if (r.b) b++;
+    return b / st.moveRing.length;
+  }
+
   function fireArousal(type, ts, out) {
     const onsetS = st.elevatedSince === null ? 0 : Math.round((ts - st.elevatedSince) / 100) / 10;
-    const ev = makeEvent(type, ts, { onset_to_trigger_s: onsetS, response: null });
+    const share = movementShare();
+    const moved = cfg.MOVEMENT_CONTEXT === 'tag' && share >= cfg.MOVEMENT_BLOCKED_FRACTION;
+    const ev = makeEvent(type, ts, {
+      onset_to_trigger_s: onsetS, response: null,
+      movement_share: Math.round(share * 100) / 100,
+      context: moved ? 'movement' : null,
+      notify: !moved
+    });
     out.push({ kind: 'event', event: ev });
-    out.push({ kind: 'log', msg: `TRIGGER [${type.toUpperCase()}] | ANS: ${st.ans} | rMSSD: -${ev.drop_percentage}% | onset to trigger: ${onsetS}s` });
+    out.push({ kind: 'log', msg: `TRIGGER [${type.toUpperCase()}]${moved ? ' (after movement, no notification)' : ''} | ANS: ${st.ans} | rMSSD: -${ev.drop_percentage}% | onset to trigger: ${onsetS}s` });
     st.tracking = {
       id: ev.id, triggerTs: ts, onsetTs: st.elevatedSince === null ? ts : st.elevatedSince,
       until: ts + cfg.RESPONSE_WINDOW_SECONDS * 1000,
@@ -670,6 +709,9 @@ function createEngine(userConfig) {
       out.push({ kind: 'log', msg: 'Cooldown ended. Baseline unfrozen.' });
     }
     const inCooldown = st.cooldownUntil > 0;
+
+    st.moveRing.push({ ts, b: !!s.blocker });
+    while (st.moveRing.length > 1 && ts - st.moveRing[0].ts > cfg.MOVEMENT_WINDOW_S * 1000) st.moveRing.shift();
 
     const reason = rejectReason(s);
     if (reason) {
@@ -964,7 +1006,9 @@ function eventRow(evt) {
   const d = new Date(evt.timestamp);
   cell(d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
   const lab = TYPE_LABEL[evt.trigger_type] || [String(evt.trigger_type || '?'), 'type-tonic'];
-  const tdType = document.createElement('td'); tdType.appendChild(el('span', lab[0], 'type-tag ' + lab[1])); tr.appendChild(tdType);
+  const tdType = document.createElement('td'); tdType.appendChild(el('span', lab[0], 'type-tag ' + lab[1]));
+  if (evt.context === 'movement') tdType.appendChild(el('span', ' dopo movimento', 'small'));
+  tr.appendChild(tdType);
   cell(evt.trigger_bpm + ' BPM', '#f8fafc');
   cell(evt.baseline_bpm == null ? '-' : evt.baseline_bpm + ' BPM', '#94a3b8');
   cell(evt.trigger_rmssd + ' ms', '#f8fafc');
@@ -1004,7 +1048,7 @@ function handleOutputs(outs) {
     if (o.kind === 'log') log(o.msg);
     else if (o.kind === 'event') {
       const events = loadEvents(); events.unshift(o.event); storeEvents(events); renderEvents();
-      if (o.event.trigger_type !== 'quiet_prolonged' && !proto.active && !ci.open) playTriggerChime(); // no sound for the quiet invite, nor during the guided path or a check-in
+      if (o.event.trigger_type !== 'quiet_prolonged' && o.event.notify !== false && !proto.active && !ci.open) playTriggerChime(); // no sound for the quiet invite, for a trigger after movement, nor during the guided path or a check-in
     } else if (o.kind === 'event_update') {
       const events = loadEvents();
       const e = events.find(x => x.id === o.id);
@@ -1222,6 +1266,7 @@ function describeRules() {
   const c = engine.config, pct = x => Math.round(x * 100);
   $('phasicRule').textContent = `BPM >= base +${c.PHASIC_BPM_RISE} and rMSSD down ${pct(c.PHASIC_DROP_PERCENT)}% or more` +
     (c.PHASIC_MIN_S > 0 ? `, held for ${c.PHASIC_MIN_S}s of valid samples.` : ', on one sample.') +
+    (c.MOVEMENT_CONTEXT === 'tag' ? ` If the movement bit is set on at least ${Math.round(c.MOVEMENT_BLOCKED_FRACTION * 100)}% of the samples in the ${c.MOVEMENT_WINDOW_S}s before, any trigger (phasic or tonic) is logged as "after movement" and stays silent.` : '') +
     (c.PHASIC_MAX_ONSET_S == null ? '' : ` Only if reached within ${c.PHASIC_MAX_ONSET_S}s from the start of the rise; later it counts as tonic.`);
   $('tonicRule').textContent = `BPM >= base +${c.TONIC_BPM_RISE} and rMSSD down ${pct(c.TONIC_DROP_PERCENT)}% or more, for ${c.TONIC_PERSISTENCE_SECONDS}s counted on valid samples.` +
     (c.FREEZE_BASELINE_WHILE_ELEVATED ? ' Baseline held while the rise lasts.' : '');
@@ -1411,6 +1456,22 @@ function playBurst() {
   src.buffer = buf; g.gain.value = 0.8; src.connect(g); g.connect(ctx.destination); src.start();
   return true;
 }
+// A plain tone for checking the phone volume. Not the sudden sound itself, so that one stays a surprise.
+function playTestTone() {
+  const ctx = audio(); if (!ctx) return false;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = 660;
+  g.gain.setValueAtTime(0.8, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+  o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.52);
+  return true;
+}
+// Phase cues: vibration only by default, because a beep at a phase change is itself a small sudden stimulus.
+function phaseCue(freq, vib) {
+  const silent = !$('cueSilent') || $('cueSilent').checked;
+  if (!silent) playCue(freq);
+  buzz(vib);
+}
 function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* not available */ } }
 
 // ---------------------------------------------------------------- screen wake lock
@@ -1434,25 +1495,27 @@ const PROTOCOL = [
   { id: 'rest1', title: 'Riposo seduto', s: 300, text: 'Siediti con la schiena appoggiata. Il braccio con il sensore resta fermo sulla gamba o sul tavolo. Respira normalmente, non usare il telefono: guarda un punto davanti a te.' },
   { id: 'breath', title: 'Respirazione guidata', s: 120, pacer: true, text: 'Segui il cerchio: inspira mentre si allarga, espira mentre si restringe (5 secondi e 5 secondi). Resta fermo.' },
   { id: 'rec1', title: 'Pausa seduto', s: 90, text: 'Respira come vuoi, fermo.' },
-  { id: 'stand', title: 'In piedi, fermo', s: 90, text: 'Alzati e resta in piedi fermo, braccia lungo i fianchi.' },
+  { id: 'stand', title: 'In piedi, fermo', s: 90, rate: true, text: 'Alzati e resta in piedi fermo, braccia lungo i fianchi.' },
   { id: 'rec2', title: 'Siediti', s: 120, text: 'Siediti di nuovo, fermo, respira come vuoi.' },
-  { id: 'math', title: 'Calcolo a mente', s: 150, text: 'Parti da 1022 e togli 13 di continuo (1009, 996, ...), a mente. Se sbagli, ricomincia da 1022. Resta seduto, braccio fermo.' },
+  { id: 'math', title: 'Calcolo a mente, a tempo', s: 150, tempo: 4, rate: true, text: 'Parti da 1022 e togli 13 di continuo (1009, 996, ...), a mente. Un numero ogni volta che il punto arancione si accende (ogni 4 secondi): tieni il ritmo. Se sbagli, ricomincia da 1022. Resta seduto, braccio fermo.' },
   { id: 'rec3', title: 'Siediti, respira', s: 120, text: 'Fermo. Respira come vuoi.' },
-  { id: 'startle', title: 'Stimolo improvviso', s: 120, startle: true, text: 'Siediti fermo, volume del telefono medio (non alto). Prima o poi sentirai un suono improvviso: non sai quando. Se ti spaventi, premi il pulsante.' },
+  { id: 'startle', title: 'Stimoli improvvisi', s: 180, startle: 2, rate: true, text: 'Siediti fermo, con il volume che hai provato prima. Sentirai due volte un suono improvviso, non sai quando. Se ti spaventi, premi il pulsante con l\'altra mano, oppure lascia stare: i suoni sono segnati comunque.' },
   { id: 'rec4', title: 'Pausa', s: 120, text: 'Fermo, respira come vuoi.' },
-  { id: 'walk', title: 'Camminata', s: 120, text: 'Cammina a passo normale, avanti e indietro. Tieni il telefono in mano o in tasca con lo schermo acceso.' },
+  { id: 'walk', title: 'Camminata', s: 120, rate: true, text: 'Cammina a passo normale, avanti e indietro. Tieni il telefono in mano o in tasca con lo schermo acceso.' },
   { id: 'rec5', title: 'Siediti', s: 120, text: 'Siediti, fermo, respira come vuoi. Ultima fase.' }
 ];
 const phaseSeconds = ph => Math.max(2, Math.round(ph.s / FAST));
-const proto = { active: false, i: -1, start: 0, end: 0, burstAt: null, burstDone: false };
+const proto = { active: false, i: -1, start: 0, end: 0, bursts: [], lastBurstTs: null };
 
 function startProtocol() {
   if (rec.id === null) { log('Collega prima il sensore (o avvia la prova senza sensore): il percorso scrive i marker nella registrazione.'); return; }
   if (proto.active) return;
   audio(); setWake(true); $('wakeChk').checked = true;
   proto.active = true;
+  const ctxData = readContext();
+  addMarker('cal:context', 'context', ctxData);
   addMarker('cal:start', 'phase', { note: $('protoNote').value.trim() || null, fast: FAST > 1 ? FAST : undefined });
-  $('protoRun').style.display = ''; $('protoStartBtn').disabled = true; $('protoNote').disabled = true;
+  $('protoRun').style.display = ''; $('protoStartBtn').disabled = true; $('protoNote').disabled = true; $('ctxBox').style.opacity = '0.5';
   log('Percorso di calibrazione avviato.');
   enterPhase(0);
 }
@@ -1461,28 +1524,40 @@ function enterPhase(i) {
   if (i >= PROTOCOL.length) { finishProtocol(false); return; }
   const ph = PROTOCOL[i], secs = phaseSeconds(ph);
   proto.i = i; proto.start = Date.now(); proto.end = proto.start + secs * 1000;
-  proto.burstAt = ph.startle ? proto.start + (0.3 + 0.45 * Math.random()) * secs * 1000 : null;
-  proto.burstDone = false;
-  addMarker(`cal:${ph.id}:start`, 'phase', { phase: ph.id, planned_s: secs });
-  playCue(i === 0 ? 523 : 660); buzz(i === 0 ? [150] : [120, 60, 120]);
+  // Sudden sounds: ph.startle of them, one in each equal slice of the middle 70% of the phase, never at the edges.
+  proto.bursts = [];
+  if (ph.startle) {
+    const n = ph.startle, from = 0.15, to = 0.85, slice = (to - from) / n;
+    for (let k = 0; k < n; k++) proto.bursts.push({ n: k + 1, at: proto.start + (from + slice * (k + 0.15 + 0.7 * Math.random())) * secs * 1000, done: false });
+  }
+  addMarker(`cal:${ph.id}:start`, 'phase', { phase: ph.id, planned_s: secs, cue: $('cueSilent').checked ? 'vibration' : 'beep+vibration' });
+  phaseCue(i === 0 ? 523 : 660, i === 0 ? [150] : [120, 60, 120]);
   $('pacer').style.display = ph.pacer ? '' : 'none';
+  $('tempoDot').style.display = ph.tempo ? '' : 'none';
+  if (ph.tempo) $('tempoDot').style.animationDuration = ph.tempo + 's';
   $('feltBtn').style.display = ph.startle ? '' : 'none';
+  showRating(i);
   renderProto();
 }
 
 function leavePhase(reason) {
   const ph = PROTOCOL[proto.i];
+  $('rateRow').style.display = 'none';
   if (ph) addMarker(`cal:${ph.id}:end`, 'phase', { phase: ph.id, reason });
 }
 
 function protoTick() {
   if (!proto.active) return;
   const now = Date.now(), ph = PROTOCOL[proto.i];
-  if (ph && ph.startle && proto.burstAt !== null && !proto.burstDone && now >= proto.burstAt) {
-    proto.burstDone = true;
-    const played = playBurst();
-    addMarker('cal:startle:burst', 'stimulus', { played });
-    log(played ? 'Stimolo sonoro riprodotto.' : 'Stimolo sonoro non riproducibile in questo browser.');
+  if (ph && ph.startle) {
+    for (const b of proto.bursts) {
+      if (b.done || now < b.at) continue;
+      b.done = true;
+      const played = playBurst();
+      proto.lastBurstTs = Date.now();
+      addMarker('cal:startle:burst', 'stimulus', { played, n: b.n, of: ph.startle });
+      log(played ? `Stimolo sonoro ${b.n} di ${ph.startle} riprodotto.` : 'Stimolo sonoro non riproducibile in questo browser.');
+    }
   }
   if (now >= proto.end) { leavePhase('done'); syncSoon(); enterPhase(proto.i + 1); return; }
   renderProto();
@@ -1504,10 +1579,10 @@ function finishProtocol(aborted) {
   if (aborted) leavePhase('aborted');
   addMarker(aborted ? 'cal:abort' : 'cal:end', 'phase');
   proto.active = false; proto.i = -1;
-  $('protoRun').style.display = 'none'; $('protoStartBtn').disabled = false; $('protoNote').disabled = false;
+  $('protoRun').style.display = 'none'; $('protoStartBtn').disabled = false; $('protoNote').disabled = false; $('ctxBox').style.opacity = '';
   $('protoStatus').textContent = aborted ? 'Interrotto' : 'Completato';
   log(aborted ? 'Percorso interrotto.' : 'Percorso completato. Puoi ripeterlo più tardi, per esempio dopo il caffè.');
-  if (!aborted) { playCue(523); buzz([200, 80, 200]); }
+  if (!aborted) phaseCue(523, [200, 80, 200]);
   syncSoon();
 }
 
@@ -1752,6 +1827,51 @@ async function endSession() {
   renderSessions(); refresh();
 }
 
+// ---------------------------------------------------------------- context before the path, and self-rating after the hard phases
+const CTX_KEY = 'bad_ctx_v13';
+const CTX_OPTIONS = {
+  ctxPlace: [['braccio_sx_alto', 'Parte alta del braccio, sinistro'], ['braccio_dx_alto', 'Parte alta del braccio, destro'], ['avambraccio_sx', 'Avambraccio sinistro'], ['avambraccio_dx', 'Avambraccio destro'], ['polso_sx', 'Polso sinistro'], ['polso_dx', 'Polso destro'], ['altro', 'Altro']],
+  ctxCaf: [['no', 'Niente nelle ultime 3 ore'], ['caffe', 'Caffè nelle ultime 3 ore'], ['altro', 'Altro stimolante (tè, energy, nicotina)']],
+  ctxSleep: [['nd', 'Non lo so'], ['<5', 'Meno di 5 ore'], ['5-6', '5-6 ore'], ['6-7', '6-7 ore'], ['7-8', '7-8 ore'], ['>8', 'Più di 8 ore']],
+  ctxVol: [['', 'Non ancora provato'], ['non_sentito', 'Non l\'ho sentito'], ['basso', 'Basso'], ['medio', 'Medio'], ['alto', 'Alto'], ['fastidioso', 'Fastidioso']]
+};
+function readContext() {
+  const d = {};
+  for (const id of Object.keys(CTX_OPTIONS)) d[id.slice(3).toLowerCase()] = $(id).value || null;
+  d.cue_silent = $('cueSilent').checked;
+  const saved = store.get(CTX_KEY, {}); Object.assign(saved, d); store.set(CTX_KEY, saved);
+  return { placement: d.place, caffeine: d.caf, sleep: d.sleep, volume_felt: d.vol, cue_silent: d.cue_silent };
+}
+function initContext() {
+  const saved = store.get(CTX_KEY, {});
+  for (const [id, opts] of Object.entries(CTX_OPTIONS)) {
+    const sel = $(id);
+    for (const [v, label] of opts) sel.appendChild(new Option(label, v));
+    const k = id.slice(3).toLowerCase();
+    if (saved[k] != null && id !== 'ctxVol' && id !== 'ctxCaf') sel.value = saved[k];   // volume and coffee are asked again each time
+  }
+  if (saved.cue_silent === false) $('cueSilent').checked = false;
+  $('volTestBtn').onclick = () => { const ok = playTestTone(); log(ok ? 'Tono di prova riprodotto. Regola il volume e scegli come lo senti.' : 'Audio non disponibile in questo browser.'); };
+}
+
+function showRating(i) {
+  const prev = PROTOCOL[i - 1];
+  const row = $('rateRow');
+  if (!prev || !prev.rate) { row.style.display = 'none'; return; }
+  $('rateLbl').textContent = `Quanto eri attivato nella fase appena finita (${prev.title.toLowerCase()})? Da 1, calmo, a 5, molto attivato. Facoltativo, con l'altra mano.`;
+  const box = $('rateBtns'); box.textContent = '';
+  for (const n of [1, 2, 3, 4, 5]) {
+    const b = el('button', String(n), 'btn-secondary scale-btn'); b.type = 'button';
+    b.onclick = () => {
+      addMarker('cal:rating', 'rating', { phase: prev.id, arousal: n });
+      for (const x of box.children) x.classList.remove('picked');
+      b.classList.add('picked'); buzz(30);
+    };
+    box.appendChild(b);
+  }
+  row.style.display = '';
+}
+
 // ---------------------------------------------------------------- wiring for the new panels
 function initV13() {
   // calibration
@@ -1761,7 +1881,12 @@ function initV13() {
   $('protoStartBtn').onclick = startProtocol;
   $('protoSkipBtn').onclick = () => { if (!proto.active) return; leavePhase('skipped'); enterPhase(proto.i + 1); };
   $('protoStopBtn').onclick = () => { if (proto.active && confirm('Interrompere il percorso?')) finishProtocol(true); };
-  $('feltBtn').onclick = () => { addMarker('cal:startle:felt', 'stimulus'); log('Segnato: ti sei spaventato.'); buzz(40); };
+  $('feltBtn').onclick = () => {
+    const since = proto.lastBurstTs ? Math.round((Date.now() - proto.lastBurstTs) / 100) / 10 : null;
+    addMarker('cal:startle:felt', 'stimulus', { since_burst_s: since });
+    log('Segnato: ti sei spaventato.'); buzz(40);
+  };
+  initContext();
   setInterval(protoTick, 250);
 
   // check-in
