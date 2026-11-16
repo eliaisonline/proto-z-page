@@ -1122,7 +1122,7 @@ function buildPayload(meta, rows) {
     format: RECORDING_FORMAT, format_version: 3, engine_version: ENGINE_VERSION,
     session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device,
     config: engine.config, columns: COLUMNS,
-    note: 'flags is the raw Polar byte: bit0 = blocker (movement), bit1 = skin contact, bit2 = skin contact supported. ts in ms, estimated back from the arrival time of each Bluetooth packet. Format 2 adds kind and data to markers (kind: manual, phase, stimulus, checkin, system). Format 3 adds: fts = the sensor clock written in the packet header (ms since 2000-01-01, same value for all beats of a packet); late = 1 for beats that arrived in a burst after a stall (their ts is not reliable, the engine did not use them); mov = standard deviation of the acceleration magnitude over the last 2 s before the packet arrived, in milli-g (null = accelerometer off); ax, ay, az = mean acceleration in milli-g over the same window (arm orientation).',
+    note: 'flags is the raw Polar byte: bit0 = blocker (movement), bit1 = skin contact, bit2 = skin contact supported. ts in ms, estimated back from the arrival time of each Bluetooth packet. Format 2 adds kind and data to markers (kind: manual, phase, stimulus, checkin, system). Format 3 adds: fts = the sensor clock in the PPI packet header, which the Verity Sense leaves at 0 (not usable, kept only so the columns stay the same); late = 1 for beats delivered in a burst after more than 15 s without packets (their ts is not reliable, the engine did not use them); mov = standard deviation of the acceleration magnitude over the last 2 s before the packet arrived, in milli-g (null = accelerometer off); ax, ay, az = mean acceleration in milli-g over the same window (arm orientation).',
     samples: rows, markers: meta.markers || [], events
   };
 }
@@ -1193,16 +1193,18 @@ function stampBatch(rows, rx) {
   for (const r of rows) { if (lastStampTs !== null && r.ts <= lastStampTs) r.ts = lastStampTs + 1; lastStampTs = r.ts; }
 }
 
-let lastFrameRx = null, lateRun = 0;
+let lastFrameRx = null, lateRun = 0, backlog = false, lastRowRx = 0;
 
 function onPpiNotification(dv) {
   const rows = parsePpiFrame(dv);
   if (!rows.length) return;
   const rx = Date.now();
-  // A normal packet comes every few seconds. Packets closer than 0.4 s, or the first one after more than 15 s of silence,
-  // are a backlog delivered in a burst: the arrival time says nothing about when the beats happened.
-  const late = lastFrameRx !== null && (rx - lastFrameRx < 400 || rx - lastFrameRx > 15000);
-  lastFrameRx = rx;
+  // A backlog starts with the first packet after more than 15 s of silence and lasts while packets keep arriving less than
+  // 0.4 s apart: the arrival time says nothing about when those beats happened. Two packets close together on their own are normal.
+  const gap = lastFrameRx === null ? 0 : rx - lastFrameRx;
+  if (gap > 15000) backlog = true; else if (backlog && gap >= 400) backlog = false;
+  const late = backlog;
+  lastFrameRx = rx; lastRowRx = rx;
   stampBatch(rows, rx);
   const a = accNow(rx);
   for (const r of rows) {
@@ -1249,7 +1251,7 @@ async function openGatt(device) {
     w(u8);
   });
   pmdControl = control; btServer = server;
-  accLive.on = false; accLive.ring = []; lastFrameRx = null;
+  accLive.on = false; accLive.ring = []; lastFrameRx = null; backlog = false;
   await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
   if (store.get(ACC_KEY, true)) {
     try { await new Promise(r => setTimeout(r, 800)); await setAcc(true); }
@@ -1571,7 +1573,7 @@ function refresh() {
   const silent = connected && (s.lastValidTs === null ? (rec.startedAt !== null && now - rec.startedAt > 40000) : now - s.lastValidTs > 15000);
   if (!connected && reconnecting) { pill.textContent = 'Reconnecting'; pill.className = 'status-pill triggered'; }
   else if (!connected) { pill.textContent = 'Disconnected'; pill.className = 'status-pill'; }
-  else if (silent) { pill.textContent = 'No valid signal'; pill.className = 'status-pill connected'; }
+  else if (silent) { pill.textContent = (now - lastRowRx < 15000) ? 'Sensore: segnale non valido' : 'Sensore: nessun dato'; pill.className = 'status-pill connected'; }
   else if (inCooldown) { pill.textContent = 'Triggered / cooldown'; pill.className = 'status-pill triggered'; }
   else if (s.monitoring) { pill.textContent = 'Surveillance active'; pill.className = 'status-pill monitoring'; }
   else { pill.textContent = 'Learning baseline'; pill.className = 'status-pill connected'; }
