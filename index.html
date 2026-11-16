@@ -170,6 +170,17 @@
       <details><summary>Le fasi</summary><ol id="protoList" class="small" style="padding-left:1.2rem; margin-top:0.4rem;"></ol></details>
     </div>
 
+    <!-- Sensor capabilities -->
+    <div class="box panel">
+      <span class="box-title">Capacità del sensore</span>
+      <div class="small">Legge dal sensore collegato quali misure offre (per esempio l'accelerometro insieme agli intervalli), lo stato della modalità SDK, il firmware e la batteria. Non cambia niente sul sensore e non interrompe la registrazione. Il risultato entra anche nei dati.</div>
+      <div class="row">
+        <button id="capBtn" class="btn-secondary" type="button">Controlla il sensore</button>
+        <button id="capCopyBtn" class="btn-secondary btn-small" type="button" style="display:none;">Copia</button>
+      </div>
+      <pre id="capOut" class="small" style="display:none; white-space:pre-wrap; word-break:break-word; margin-top:0.5rem;"></pre>
+    </div>
+
     <div class="two">
       <!-- Check-ins -->
       <div class="box panel">
@@ -1193,6 +1204,9 @@ function ingestRows(rows) {
   refresh();
 }
 
+let pmdControl = null, btServer = null;
+const diag = { waiting: null, running: false };
+
 async function openGatt(device) {
   const server = await device.gatt.connect();
   const pmd = await server.getPrimaryService(PMD_SERVICE);
@@ -1201,7 +1215,92 @@ async function openGatt(device) {
   await data.startNotifications();
   data.addEventListener('characteristicvaluechanged', e => onPpiNotification(e.target.value));
   await control.startNotifications();
+  // answers of the control point are read only while a capability check is waiting for one
+  control.addEventListener('characteristicvaluechanged', e => {
+    if (!diag.waiting) return;
+    const v = e.target.value, w = diag.waiting; diag.waiting = null;
+    w(new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)));
+  });
+  pmdControl = control; btServer = server;
   await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
+}
+
+// ---------------------------------------------------------------- sensor capabilities (read only: nothing is changed on the sensor)
+const hexOf = u8 => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
+const PMD_TYPES = { 0: 'ECG', 1: 'PPG', 2: 'ACC', 3: 'PPI', 5: 'gyroscope', 6: 'magnetometer' };
+const PMD_STATUS = { 0: 'ok', 1: 'invalid op code', 2: 'invalid measurement type', 3: 'not supported', 4: 'invalid length', 5: 'invalid parameter', 6: 'already in state', 12: 'invalid state', 13: 'device in charger' };
+
+function pmdCommand(bytes, timeoutMs) {
+  return new Promise(resolve => {
+    const t = setTimeout(() => { diag.waiting = null; resolve({ timeout: true }); }, timeoutMs || 3000);
+    diag.waiting = r => { clearTimeout(t); resolve({ raw: r }); };
+    pmdControl.writeValueWithResponse(new Uint8Array(bytes)).catch(err => { clearTimeout(t); diag.waiting = null; resolve({ error: err.message }); });
+  });
+}
+
+// settings payload: [type, count, values...]; types 0,1,2 are 16-bit, 3 and 5 are 32-bit, 4 is 8-bit
+function parseSettings(b) {
+  const names = { 0: 'sample rate (Hz)', 1: 'resolution (bit)', 2: 'range', 3: 'range (milli-unit)', 4: 'channels', 5: 'factor' };
+  const out = [];
+  let i = 0;
+  while (i + 1 < b.length) {
+    const type = b[i], n = b[i + 1], size = (type === 4) ? 1 : (type === 3 || type === 5) ? 4 : 2;
+    i += 2;
+    const vals = [];
+    for (let k = 0; k < n && i + size <= b.length; k++, i += size) {
+      let v = 0; for (let j = size - 1; j >= 0; j--) v = v * 256 + b[i + j];
+      vals.push(v);
+    }
+    out.push(`${names[type] || 'setting ' + type}: ${vals.join(', ')}`);
+  }
+  return out.join('; ');
+}
+
+function describeReply(label, r) {
+  if (r.timeout) return `${label}: no answer in 3 s`;
+  if (r.error) return `${label}: write failed (${r.error})`;
+  const b = r.raw;
+  if (b.length < 4 || b[0] !== 0xF0) return `${label}: unexpected reply [${hexOf(b)}]`;
+  const status = PMD_STATUS[b[3]] || ('code ' + b[3]);
+  const params = b.slice(5);
+  return `${label}: ${status}${b[3] === 0 && params.length ? ' | ' + hexOf(params) : ''}${b[3] === 0 && b[1] === 1 && params.length ? ' | ' + parseSettings(params) : ''}   [${hexOf(b)}]`;
+}
+
+async function checkCapabilities() {
+  if (diag.running) return;
+  if (!connected || !pmdControl) { log('Collega prima il sensore: il controllo legge le capacità dal sensore collegato.'); return; }
+  diag.running = true; $('capBtn').disabled = true;
+  const lines = [`Sensore: ${btDevice ? btDevice.name : '?'} | ${new Date().toLocaleString()}`];
+  try {
+    try {
+      const f = await pmdControl.readValue();
+      const u8 = new Uint8Array(f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
+      const types = u8.length > 1 ? Object.entries(PMD_TYPES).filter(([bit]) => u8[1] & (1 << Number(bit))).map(([, n]) => n) : [];
+      lines.push(`Funzioni dichiarate dal sensore (PMD): ${types.join(', ') || 'nessuna letta'}   [${hexOf(u8)}]`);
+    } catch (e) { lines.push('Funzioni dichiarate: lettura non riuscita (' + e.message + ')'); }
+    lines.push(describeReply('Modalità SDK (stato; 00 = spenta, 01 = accesa)', await pmdCommand([0x06])));
+    lines.push(describeReply('Impostazioni accelerometro in modalità normale', await pmdCommand([0x01, 0x02])));
+    lines.push(describeReply('Impostazioni PPG in modalità normale', await pmdCommand([0x01, 0x01])));
+    lines.push(describeReply('Impostazioni intervalli PPI', await pmdCommand([0x01, 0x03])));
+    try {
+      const di = await btServer.getPrimaryService('device_information');
+      for (const [name, label] of [['firmware_revision_string', 'Firmware'], ['model_number_string', 'Modello']]) {
+        try { const v = await (await di.getCharacteristic(name)).readValue(); lines.push(`${label}: ${new TextDecoder().decode(v).replace(/\0/g, '')}`); }
+        catch (e) { lines.push(`${label}: non letto`); }
+      }
+    } catch (e) { lines.push('Informazioni del dispositivo (firmware, modello): servizio non accessibile'); }
+    try {
+      const bs = await btServer.getPrimaryService('battery_service');
+      const v = await (await bs.getCharacteristic('battery_level')).readValue();
+      lines.push(`Batteria: ${v.getUint8(0)}%`);
+    } catch (e) { lines.push('Batteria: non letta'); }
+  } catch (e) { lines.push('Controllo interrotto: ' + e.message); }
+  diag.running = false; $('capBtn').disabled = false; diag.waiting = null;
+  const text = lines.join('\n');
+  $('capOut').textContent = text; $('capOut').style.display = ''; $('capCopyBtn').style.display = '';
+  addMarker('sensor:capabilities', 'system', { text });
+  log('Controllo delle capacità completato (salvato anche nella registrazione).');
+  syncSoon();
 }
 
 function scheduleReconnect() {
@@ -1234,7 +1333,7 @@ async function connect() {
     log('Requesting Polar device...');
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ namePrefix: 'Polar' }, { services: ['heart_rate'] }],
-      optionalServices: [PMD_SERVICE, 'heart_rate', 'battery_service']
+      optionalServices: [PMD_SERVICE, 'heart_rate', 'battery_service', 'device_information']
     });
     log(`Device selected: ${device.name}`);
     btDevice = device; wantConnected = true; reconnectTries = 0;
@@ -1887,6 +1986,8 @@ function initV13() {
     log('Segnato: ti sei spaventato.'); buzz(40);
   };
   initContext();
+  $('capBtn').onclick = checkCapabilities;
+  $('capCopyBtn').onclick = async () => { try { await navigator.clipboard.writeText($('capOut').textContent); log('Testo copiato.'); } catch (e) { log('Copia non riuscita: seleziona il testo a mano.'); } };
   setInterval(protoTick, 250);
 
   // check-in
