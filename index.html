@@ -1111,6 +1111,7 @@ function flushRecording() {
 function startSession(deviceName) {
   rec.id = 'rec_' + Date.now(); rec.startedAt = Date.now(); rec.device = deviceName || null;
   rec.rows = []; rec.markers = []; rec.flushed = 0; rec.dirty = true;
+  if (pendingAccMarker) { addMarker('sensor:acc_start', 'system', pendingAccMarker); pendingAccMarker = null; }
   flushRecording();
   log(`Recording started (${rec.id}). Raw samples are kept${rec.db ? ' in this browser every 15 s' : ' in memory only: export before closing the page'}.`);
 }
@@ -1254,8 +1255,10 @@ async function openGatt(device) {
   accLive.on = false; accLive.ring = []; lastFrameRx = null; backlog = false;
   await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
   if (store.get(ACC_KEY, true)) {
-    try { await new Promise(r => setTimeout(r, 800)); await setAcc(true); }
-    catch (err) { log('Accelerometro non avviato: ' + err.message); }
+    try {
+      await new Promise(r => setTimeout(r, 800)); await setAcc(true);
+      if (!accLive.on) { await new Promise(r => setTimeout(r, 2500)); await setAcc(true); }   // right after a reconnection the first try can be refused
+    } catch (err) { log('Accelerometro non avviato: ' + err.message); }
   }
 }
 
@@ -1263,6 +1266,7 @@ async function openGatt(device) {
 const acc = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };
 const accLive = { on: false, ring: [] };   // always-on accelerometer: the last few seconds of samples
 const ACC_KEY = 'bad_acc_v13';
+let pendingAccMarker = null;
 const ACC_START = [0x02, 0x02, 0x00, 0x01, 0x34, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x08, 0x00, 0x04, 0x01, 0x03];   // 52 Hz, 16 bit, 8 g, 3 axes
 
 // Movement and arm orientation over the last 2 s before time t. null if the accelerometer is off or silent.
@@ -1282,6 +1286,8 @@ async function setAcc(on) {
     if (accLive.on) return;
     const r = await pmdCommand(ACC_START, 4000);
     accLive.on = !!(r.raw && (r.raw[3] === 0 || r.raw[3] === 6));
+    const info = { ok: accLive.on, reply: r.raw ? hexOf(r.raw) : (r.timeout ? 'timeout' : (r.error || '?')) };
+    if (rec.id !== null) addMarker('sensor:acc_start', 'system', info); else pendingAccMarker = info;   // the session starts a moment later
     log(accLive.on ? 'Accelerometro acceso (52 Hz): movimento e orientamento del braccio entrano nei dati.' : 'Accelerometro non avviato. ' + describeReply('Risposta', r));
   } else {
     accLive.on = false; accLive.ring = [];
