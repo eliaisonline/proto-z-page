@@ -121,6 +121,7 @@
       <button id="endBtn" class="btn-secondary">Chiudi sessione</button>
       <label class="small"><input type="checkbox" id="wakeChk" checked> Schermo sempre acceso</label>
       <label class="small"><input type="checkbox" id="accChk" checked> Accelerometro acceso (movimento e orientamento del braccio)</label>
+      <label class="small"><input type="checkbox" id="ppgChk"> Registra anche il PPG grezzo (pesante, circa 1 KB al secondo: solo per calibrazione e prove)</label>
       <span id="wakeNote" class="small" style="color:#fbbf24;"></span>
     </div>
     <div class="controls-bar">
@@ -1073,6 +1074,12 @@ function handleOutputs(outs) {
 
 // ---------------------------------------------------------------- recording (raw samples)
 const rec = { id: null, startedAt: null, device: null, rows: [], markers: [], flushed: 0, db: null, dirty: false };
+// Optional raw PPG recording (heavy: about 1 KB per second). Frames are kept apart from the PPI rows and stored in the same IndexedDB
+// 'chunks' store under the session id + ':ppg'. Frame = [sensor_ts_ms, arrival_ms, ...values]: values are groups of 4 (c0, c1, c2, ambient);
+// the first group is raw, every following group is the difference from the previous one.
+const ppgRec = { on: false, frames: [], flushed: 0 };
+const PPG_KEY = 'bad_ppg_v13';
+const PPG_FORMAT_NOTE = 'frame = [sensor_ts_ms, arrival_ms, ...values]. sensor_ts_ms = timestamp in the PPG frame header (the sensor clock, ms since 1970; it is a real clock, unlike the PPI header), null if the browser cannot read it; arrival_ms = when the Bluetooth packet arrived. values come in groups of 4 samples (c0, c1, c2, ambient) at 55 Hz: the first group is raw, every following group is the difference from the previous group. The frame timestamp is the time of the LAST sample in the frame.';
 
 function openDb() {
   return new Promise(resolve => {
@@ -1098,10 +1105,12 @@ function sessionMeta() {
 function flushRecording() {
   if (!rec.db || rec.id === null) return;
   const chunk = rec.rows.slice(rec.flushed);
-  if (!chunk.length && !rec.dirty) return;
+  const pchunk = ppgRec.frames.slice(ppgRec.flushed);
+  if (!chunk.length && !pchunk.length && !rec.dirty) return;
   try {
     const tx = rec.db.transaction(['chunks', 'sessions'], 'readwrite');
     if (chunk.length) tx.objectStore('chunks').put({ sid: rec.id, seq: rec.flushed, rows: chunk });
+    if (pchunk.length) { tx.objectStore('chunks').put({ sid: rec.id + ':ppg', seq: ppgRec.flushed, rows: pchunk }); ppgRec.flushed = ppgRec.frames.length; }
     tx.objectStore('sessions').put(sessionMeta());
     rec.flushed = rec.rows.length; rec.dirty = false;
     tx.oncomplete = () => renderSessions();
@@ -1111,7 +1120,7 @@ function flushRecording() {
 
 function startSession(deviceName) {
   rec.id = 'rec_' + Date.now(); rec.startedAt = Date.now(); rec.device = deviceName || null;
-  rec.rows = []; rec.markers = []; rec.flushed = 0; rec.dirty = true;
+  rec.rows = []; rec.markers = []; rec.flushed = 0; rec.dirty = true; ppgRec.frames = []; ppgRec.flushed = 0;
   if (pendingAccMarker) { addMarker('sensor:acc_start', 'system', pendingAccMarker); pendingAccMarker = null; }
   flushRecording();
   log(`Recording started (${rec.id}). Raw samples are kept${rec.db ? ' in this browser every 15 s' : ' in memory only: export before closing the page'}.`);
@@ -1154,7 +1163,10 @@ async function renderSessions() {
     exp.onclick = async () => {
       if (s.id === rec.id) flushRecording();
       const rows = s.id === rec.id ? rec.rows : await loadSessionRows(s.id);
-      download(`ppi_recording_${fileStamp(s.startedAt)}.json`, buildPayload(s.id === rec.id ? sessionMeta() : s, rows));
+      const payload = buildPayload(s.id === rec.id ? sessionMeta() : s, rows);
+      const pf = s.id === rec.id ? ppgRec.frames : await loadSessionRows(s.id + ':ppg');
+      if (pf.length) payload.ppg = { rate_hz: 55, channels: ['c0', 'c1', 'c2', 'ambient'], note: PPG_FORMAT_NOTE, frames: pf };
+      download(`ppi_recording_${fileStamp(s.startedAt)}.json`, payload);
     };
     td.appendChild(exp);
     const up = el('button', 'Carica', 'btn-secondary btn-small'); up.style.marginLeft = '0.4rem';
@@ -1165,7 +1177,7 @@ async function renderSessions() {
       del.onclick = () => {
         if (!confirm('Delete this recording from the browser? Export it first if you need it.')) return;
         const tx = rec.db.transaction(['chunks', 'sessions'], 'readwrite');
-        tx.objectStore('chunks').delete(sessionRange(s.id)); tx.objectStore('sessions').delete(s.id);
+        tx.objectStore('chunks').delete(sessionRange(s.id)); tx.objectStore('chunks').delete(sessionRange(s.id + ':ppg')); tx.objectStore('sessions').delete(s.id);
         tx.oncomplete = () => renderSessions();
       };
       td.appendChild(del);
@@ -1254,13 +1266,19 @@ async function openGatt(device) {
     w(u8);
   });
   pmdControl = control; btServer = server;
-  accLive.on = false; accLive.ring = []; lastFrameRx = null; backlog = false;
+  accLive.on = false; accLive.ring = []; ppgRec.on = false; lastFrameRx = null; backlog = false;
   await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
   if (store.get(ACC_KEY, true)) {
     try {
       await new Promise(r => setTimeout(r, 800)); await setAcc(true);
       if (!accLive.on) { await new Promise(r => setTimeout(r, 2500)); await setAcc(true); }   // right after a reconnection the first try can be refused
     } catch (err) { log('Accelerometro non avviato: ' + err.message); }
+  }
+  if (store.get(PPG_KEY, false)) {
+    try {
+      await new Promise(r => setTimeout(r, 800)); await setPpgRec(true);
+      if (!ppgRec.on) { await new Promise(r => setTimeout(r, 2500)); await setPpgRec(true); }
+    } catch (err) { log('PPG grezzo non avviato: ' + err.message); }
   }
 }
 
@@ -1447,16 +1465,44 @@ function parsePpgFrame(dv) {
 }
 
 function onPpgFrame(dv) {
-  if (!ppg.active || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 1) return;
+  if ((!ppg.active && !ppgRec.on) || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 1) return;
   const r = parsePpgFrame(dv);
   const now = Date.now();
-  ppg.frames++;
-  if (!ppg.firstHex) ppg.firstHex = hexOf(new Uint8Array(dv.buffer, dv.byteOffset, Math.min(dv.byteLength, 24)));
-  if (!r) { ppg.bad++; return; }
-  ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1;
-  if (!r.samples) { ppg.bad++; return; }
+  if (ppg.active) {
+    ppg.frames++;
+    if (!ppg.firstHex) ppg.firstHex = hexOf(new Uint8Array(dv.buffer, dv.byteOffset, Math.min(dv.byteLength, 24)));
+  }
+  if (!r || !r.samples) { if (ppg.active) { ppg.bad++; if (r) ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1; } return; }
   const n = r.samples.length;
-  r.samples.forEach((sm, i) => ppg.samples.push([now - Math.round((n - 1 - i) * 1000 / 55), sm[0], sm[1], sm[2], sm[3]]));
+  if (ppg.active) {
+    ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1;
+    r.samples.forEach((sm, i) => ppg.samples.push([now - Math.round((n - 1 - i) * 1000 / 55), sm[0], sm[1], sm[2], sm[3]]));
+  }
+  if (ppgRec.on) {
+    let fts = null;
+    try { fts = Number(dv.getBigUint64(1, true) / 1000000n) + 946684800000; } catch (e) { /* no BigInt: leave null */ }
+    const f = [fts, now];
+    r.samples.forEach((sm, i) => { for (let c = 0; c < 4; c++) f.push(i === 0 ? sm[c] : sm[c] - r.samples[i - 1][c]); });
+    ppgRec.frames.push(f);
+  }
+}
+
+// Start or stop the raw PPG recording (opt-in, see PPG_KEY). The test below leaves a running recording alone.
+async function setPpgRec(on) {
+  if (!pmdControl || diag.running) return;
+  if (on) {
+    if (ppgRec.on) return;
+    const r = await pmdCommand(PPG_START, 4000);
+    ppgRec.on = !!(r.raw && (r.raw[3] === 0 || r.raw[3] === 6));
+    const info = { ok: ppgRec.on, reply: r.raw ? hexOf(r.raw) : (r.timeout ? 'timeout' : (r.error || '?')) };
+    if (rec.id !== null) addMarker('sensor:ppg_start', 'system', info);
+    log(ppgRec.on ? 'PPG grezzo acceso (55 Hz, 4 canali): i campioni si registrano a parte.' : 'PPG grezzo non avviato. ' + describeReply('Risposta', r));
+  } else {
+    ppgRec.on = false;
+    await pmdCommand([0x03, 0x01], 3000);
+    log('PPG grezzo spento.');
+  }
+  refresh();
 }
 
 async function runPpgTest() {
@@ -1475,8 +1521,9 @@ async function runPpgTest() {
     ppg.frames = 0; ppg.firstHex = null; ppg.types = {}; ppg.bad = 0; ppg.samples = [];
     acc.frames = 0; acc.types = {}; acc.bad = 0; acc.samples = []; acc.firstHex = null;
     const rowsBefore = rec.rows.length, t0 = Date.now();
-    const start = await pmdCommand(PPG_START, 4000);
-    lines.push(describeReply('Avvio PPG (55 Hz, 22 bit, 4 canali)', start));
+    const alreadyRec = ppgRec.on;
+    const start = alreadyRec ? { raw: [0xF0, 2, 1, 0, 0] } : await pmdCommand(PPG_START, 4000);
+    lines.push(alreadyRec ? 'PPG già acceso (registrazione continua).' : describeReply('Avvio PPG (55 Hz, 22 bit, 4 canali)', start));
     const startedOk = start.raw && (start.raw[3] === 0 || start.raw[3] === 6);
     if (startedOk) {
       ppg.active = true; acc.active = true;
@@ -1485,7 +1532,7 @@ async function runPpgTest() {
         await new Promise(r => setTimeout(r, 1000));
       }
       ppg.active = false; acc.active = false;
-      lines.push(describeReply('Stop PPG', await pmdCommand([0x03, 0x01], 3000)));
+      if (!alreadyRec) lines.push(describeReply('Stop PPG', await pmdCommand([0x03, 0x01], 3000)));
       const sm = ppg.samples, rowsDuring = rec.rows.slice(rowsBefore);
       const valid = rowsDuring.filter(r => !(r[4] & 1) && r[3] <= 30).length;
       lines.push(`Frame PPG ricevuti: ${ppg.frames} (non letti: ${ppg.bad}) | tipi di frame (byte): ${Object.keys(ppg.types).map(k => '0x' + Number(k).toString(16) + ' x' + ppg.types[k]).join(', ') || 'nessuno'}`);
@@ -1634,7 +1681,7 @@ async function connect() {
     log(`Device selected: ${device.name}`);
     btDevice = device; wantConnected = true; reconnectTries = 0;
     device.addEventListener('gattserverdisconnected', () => {
-      connected = false; $('connectBtn').disabled = false; accLive.on = false; accLive.ring = [];
+      connected = false; $('connectBtn').disabled = false; accLive.on = false; accLive.ring = []; ppgRec.on = false;
       flushRecording();
       if (wantConnected) {
         addMarker('sensor:disconnected', 'system');
@@ -1724,7 +1771,7 @@ function refresh() {
   if (rec.id !== null) {
     $('recText').textContent = `Recording: ${rec.rows.length} samples since ${new Date(rec.startedAt).toLocaleTimeString()} · ${rec.markers.length} marker${rec.markers.length === 1 ? '' : 's'} · ` +
       (rec.db ? 'saved in this browser every 15 s' : 'in memory only, export before closing') +
-      (connected ? ` · accelerometro ${accLive.on ? (() => { const a = accNow(Date.now()); return a ? (a.mov >= 40 ? `movimento (${a.mov} mG)` : `fermo (${a.mov} mG)`) : 'acceso, in attesa di dati'; })() : 'spento'}` : '');
+      (connected ? ` · accelerometro ${accLive.on ? (() => { const a = accNow(Date.now()); return a ? (a.mov >= 40 ? `movimento (${a.mov} mG)` : `fermo (${a.mov} mG)`) : 'acceso, in attesa di dati'; })() : 'spento'}` + (ppgRec.on ? ` · PPG grezzo registrato (${ppgRec.frames.length} frame)` : '') : '');
   }
 }
 
@@ -2125,6 +2172,31 @@ async function uploadSession(meta, rows, markers, final) {
   throw new Error('non trovo un nome libero per il file: controlla la cartella nel repository');
 }
 
+// Raw PPG frames go to their own files (ppg_00001.json, ...) next to the PPI chunks, at most 1500 frames each.
+async function uploadPpg(meta, frames, final) {
+  const c = syncCfg();
+  if (!syncReady(c) || !frames.length) return null;
+  const key = meta.id + ':ppg';
+  let st = syncState(key), sent = 0, msg = null;
+  for (let round = 0; round < 4 && st.rows < frames.length; round++) {
+    const part = frames.slice(st.rows, st.rows + 1500);
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const seq = st.seq + 1 + attempt;
+      const payload = {
+        format: 'body-activated-diary/ppg-chunk', format_version: 1, engine_version: ENGINE_VERSION,
+        session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device,
+        rate_hz: 55, channels: ['c0', 'c1', 'c2', 'ambient'], note: PPG_FORMAT_NOTE,
+        frame_offset: st.rows, frames: part, seq, uploaded_at: new Date().toISOString(), final: !!final
+      };
+      const path = `${c.folder || 'data'}/${meta.id}/ppg_${String(seq).padStart(5, '0')}.json`;
+      const r = await ghPut(c, path, JSON.stringify(payload), `ppg ${meta.id} #${seq}`);
+      if (r === 'ok') { st = { rows: st.rows + part.length, markers: 0, seq, evSig: '' }; syncStateSave(key, st); sent += part.length; msg = `PPG parte ${seq} caricata`; break; }
+      if (attempt === 5) throw new Error('non trovo un nome libero per il file PPG');
+    }
+  }
+  return msg ? `${msg} (${sent} frame)` : null;
+}
+
 async function syncNow(final) {
   const c = syncCfg();
   if (!syncReady(c)) { renderSyncStatus(); return; }
@@ -2133,6 +2205,8 @@ async function syncNow(final) {
   try {
     flushRecording();
     const msg = await uploadSession(sessionMeta(), rec.rows, rec.markers, final);
+    const pm = await uploadPpg(sessionMeta(), ppgRec.frames, final);
+    if (pm) log('Salvataggio su GitHub: ' + pm);
     sync.lastOk = Date.now(); sync.lastErr = null; sync.pendingRows = 0;
     if (!/^niente/.test(msg)) log('Salvataggio su GitHub: ' + msg);
   } catch (e) {
@@ -2148,6 +2222,9 @@ async function syncStored(s) {
     const rows = s.id === rec.id ? rec.rows : await loadSessionRows(s.id);
     const msg = await uploadSession(s.id === rec.id ? sessionMeta() : s, rows, s.markers || [], true);
     log(`Sessione ${new Date(s.startedAt).toLocaleString()}: ${msg}`);
+    const pf = s.id === rec.id ? ppgRec.frames : await loadSessionRows(s.id + ':ppg');
+    const pm = await uploadPpg(s.id === rec.id ? sessionMeta() : s, pf, true);
+    if (pm) log(pm);
   } catch (e) { log('Caricamento non riuscito: ' + e.message); }
   renderSyncStatus();
 }
@@ -2287,6 +2364,8 @@ function initV13() {
   $('capBtn').onclick = checkCapabilities;
   $('accBtn').onclick = runAccTest;
   $('ppgBtn').onclick = runPpgTest;
+  $('ppgChk').checked = store.get(PPG_KEY, false);
+  $('ppgChk').onchange = () => { store.set(PPG_KEY, $('ppgChk').checked); if (connected) setPpgRec($('ppgChk').checked).catch(err => log('PPG grezzo: ' + err.message)); };
   $('accChk').checked = store.get(ACC_KEY, true);
   $('accChk').onchange = () => { store.set(ACC_KEY, $('accChk').checked); if (connected) setAcc($('accChk').checked).catch(err => log('Accelerometro: ' + err.message)); };
   $('capCopyBtn').onclick = async () => { try { await navigator.clipboard.writeText($('capOut').textContent); log('Testo copiato.'); } catch (e) { log('Copia non riuscita: seleziona il testo a mano.'); } };
