@@ -93,6 +93,7 @@
     .scale-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.4rem; }
     .scale-btn { padding: 0.6rem 0; font-size: 1rem; min-height: 3rem; }
     .ends { display: flex; justify-content: space-between; font-size: 0.7rem; color: #94a3b8; margin-top: -0.4rem; }
+    .attn { outline: 2px solid #f59e0b; outline-offset: 3px; border-radius: 0.5rem; padding: 0.35rem; }
     .scale-btn.picked { background: #0284c7; color: #fff; border-color: #0284c7; }
     @media (max-width: 800px) {
       body { padding: 0.75rem; }
@@ -163,6 +164,9 @@
         <div id="rateRow" style="display:none; margin:0.5rem 0;">
           <div id="rateLbl" class="small"></div>
           <div id="rateBtns" class="row" style="justify-content:center;"></div>
+        </div>
+        <div id="vidRow" style="display:none; margin:0.5rem 0;">
+          <label class="field">Cosa stai guardando<select id="vidContent"><option value="neutral">Neutro</option><option value="fear">Paura (horror)</option><option value="arousing">Alta attivazione</option><option value="other">Altro</option></select></label>
         </div>
         <div class="progress-bar-bg"><div id="protoBar" class="progress-bar-fill"></div></div>
         <div class="row" style="justify-content:center; margin-top:0.75rem;">
@@ -387,7 +391,7 @@
 // what happened (events, event updates, log lines). Time comes only from the
 // sample timestamps, so the same code runs live and on a recording (replay).
 // ============================================================================
-const ENGINE_VERSION = '1.4.0';
+const ENGINE_VERSION = '1.4.1';
 
 // All values are starting points, not validated thresholds.
 const DEFAULT_CONFIG = {
@@ -447,6 +451,24 @@ const DEFAULT_CONFIG = {
   TONIC_Z_BPM: 2.5,
   TONIC_Z_RMSSD: 2.0,
 
+  // --- v1.4.1: window detector (used by the shadow engine 'finestra'). Instead of two thresholds crossed at the same moment for N seconds, it
+  // looks at the last WINDOW_S seconds of valid samples: the share of samples that are above soft thresholds (in units of the person's own
+  // noise, see THRESHOLD_MODE 'noise') must reach WINDOW_FRACTION. It does not fire if the orientation of the arm changed (posture).
+  DETECTOR: 'threshold',            // 'threshold' (v1.3.1 rules) | 'window'
+  WINDOW_S: 45,
+  WINDOW_MIN_N: 20,                 // valid samples needed in the window
+  WINDOW_FRACTION: 0.6,             // share of samples in the window that must be 'hot' to fire
+  WINDOW_HOLD_FRACTION: 0.3,        // above this share the baseline is frozen and a new trigger waits for the share to fall below it
+  WINDOW_Z_BPM: 1.5,
+  WINDOW_Z_RMSSD: 1.0,
+  WINDOW_MIN_BPM_RISE: 3,
+  WINDOW_MIN_LN_DROP: 0.15,
+  ORIENT_GATE: true,                // needs ax, ay, az on the samples; without them the gate does nothing
+  ORIENT_CHANGE_DEG: 25,            // angle between the arm direction 150..45 s ago and in the last 10 s (indicative: one stand-up gave 32 deg)
+  ORIENT_REF_START_S: 150,
+  ORIENT_REF_END_S: 45,
+  ORIENT_NOW_S: 10,
+
   // --- Pathway 2: tonic
   TONIC_DROP_PERCENT: 0.30,
   TONIC_BPM_RISE: 5,
@@ -487,13 +509,16 @@ const V1_1_COMPAT_CONFIG = {
   PHASIC_MAX_ONSET_S: null,
   QUIET_ENABLED: false,
   MOVEMENT_SOURCE: 'blocker',
-  THRESHOLD_MODE: 'percent'
+  THRESHOLD_MODE: 'percent',
+  DETECTOR: 'threshold'
 };
 // v1.3.1 exactly (for before/after comparisons)
 const V1_3_1_CONFIG = { MOVEMENT_SOURCE: 'blocker', THRESHOLD_MODE: 'percent' };
 // Shadow engines (v1.4): they see the same beats as the live engine, write their events as markers (kind 'shadow') and never
 // notify. Exploratory presets, chosen on a few sessions of one person: they exist to be compared on the next recordings.
 const SHADOW_CONFIGS = [
+  { id: 'finestra', label: 'frazione di campioni oltre soglie morbide in 45 s, non se cambia l\'orientamento del braccio',
+    cfg: { DETECTOR: 'window', QUIET_ENABLED: false } },
   { id: 'rumore', label: 'soglie in unità di rumore personale',
     cfg: { THRESHOLD_MODE: 'noise', PHASIC_Z_BPM: 2.5, PHASIC_Z_RMSSD: 1.5, TONIC_Z_BPM: 2.0, TONIC_Z_RMSSD: 1.0, QUIET_ENABLED: false } },
   { id: 'solo_bpm', label: 'solo battito, in unità di rumore',
@@ -547,6 +572,7 @@ function createEngine(userConfig) {
     elevatedSince: null, tonicSeconds: 0, needRelease: false,
     moveRing: [],
     noise: [], noiseLastTs: 0, sigmaBpm: null, sigmaLn: null,
+    orient: [], win: [], winHot: false, winFrac: 0, orientDeg: null, orientLogged: false,
     ans: 'BALANCED',
     tracking: null,
     // quiet pathway
@@ -627,6 +653,41 @@ function createEngine(userConfig) {
       st.sigmaBpm = Math.max(cfg.NOISE_MIN_SIGMA_BPM, mad(st.noise.map(r => r[1])));
       st.sigmaLn = Math.max(cfg.NOISE_MIN_SIGMA_LN, mad(st.noise.map(r => r[2])));
     } else { st.sigmaBpm = null; st.sigmaLn = null; }
+  }
+
+  function median3(arr) { const s = arr.slice().sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+  // Angle (degrees) between the mean arm direction some time ago and the one now; null when there is not enough accelerometer data.
+  function orientAngle(ts) {
+    const refA = ts - cfg.ORIENT_REF_START_S * 1000, refB = ts - cfg.ORIENT_REF_END_S * 1000, nowA = ts - cfg.ORIENT_NOW_S * 1000;
+    const ref = [], now = [];
+    for (const o of st.orient) { if (o.ts >= refA && o.ts < refB) ref.push(o.v); else if (o.ts >= nowA) now.push(o.v); }
+    if (ref.length < 5 || now.length < 3) return null;
+    const mv = a => [0, 1, 2].map(i => median3(a.map(v => v[i])));
+    const u = mv(ref), v = mv(now);
+    const nu = Math.hypot(u[0], u[1], u[2]), nv = Math.hypot(v[0], v[1], v[2]);
+    if (!(nu > 0) || !(nv > 0)) return null;
+    const c = Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (nu * nv)));
+    return Math.round(Math.acos(c) * 1800 / Math.PI) / 10;
+  }
+
+  function windowStep(ts, hit, inCooldown, out) {
+    st.win.push({ ts, hit });
+    while (st.win.length > 1 && ts - st.win[0].ts > cfg.WINDOW_S * 1000) st.win.shift();
+    let h = 0; for (const w of st.win) if (w.hit) h++;
+    const n = st.win.length, span = ts - st.win[0].ts, frac = n ? h / n : 0;
+    st.winFrac = frac; st.winHot = frac >= cfg.WINDOW_HOLD_FRACTION;
+    if (st.needRelease && frac < cfg.WINDOW_HOLD_FRACTION) st.needRelease = false;
+    st.orientDeg = cfg.ORIENT_GATE ? orientAngle(ts) : null;
+    if (!st.monitoring || inCooldown || st.needRelease) return;
+    if (n < cfg.WINDOW_MIN_N || span < cfg.WINDOW_S * 1000 * 0.66 || frac < cfg.WINDOW_FRACTION) return;
+    if (cfg.ORIENT_GATE && st.orientDeg !== null && st.orientDeg >= cfg.ORIENT_CHANGE_DEG) {
+      if (!st.orientLogged) { st.orientLogged = true; out.push({ kind: 'log', msg: `Window above thresholds but the arm direction changed by ${st.orientDeg} deg: posture, no trigger.` }); }
+      return;
+    }
+    st.orientLogged = false;
+    fireArousal('window_score', ts, out);
+    for (let i = out.length - 1; i >= 0; i--) if (out[i].kind === 'event') { out[i].event.window_fraction = Math.round(frac * 100) / 100; out[i].event.orientation_change_deg = st.orientDeg; break; }
   }
 
   function fireArousal(type, ts, out) {
@@ -789,6 +850,10 @@ function createEngine(userConfig) {
     const inCooldown = st.cooldownUntil > 0;
 
     st.moveRing.push({ ts, b: !!s.blocker, m: (s.mov == null ? null : s.mov) });
+    if (s.ax != null && s.ay != null && s.az != null) {
+      st.orient.push({ ts, v: [s.ax, s.ay, s.az] });
+      while (st.orient.length && ts - st.orient[0].ts > (cfg.ORIENT_REF_START_S + 5) * 1000) st.orient.shift();
+    }
     while (st.moveRing.length > 1 && ts - st.moveRing[0].ts > cfg.MOVEMENT_WINDOW_S * 1000) st.moveRing.shift();
 
     const reason = rejectReason(s);
@@ -827,14 +892,14 @@ function createEngine(userConfig) {
     }
 
     // Baseline: frozen during cooldown (and, if asked, while a rise is in progress).
-    const hold = inCooldown || (cfg.FREEZE_BASELINE_WHILE_ELEVATED && st.elevatedSince !== null);
+    const hold = inCooldown || (cfg.FREEZE_BASELINE_WHILE_ELEVATED && st.elevatedSince !== null) || (cfg.DETECTOR === 'window' && st.winHot);
     if (!hold) {
       st.baseRmssdHist.push(st.rmssd);
       st.baseBpmHist.push(st.bpm);
       if (st.baseRmssdHist.length > cfg.MAX_BASELINE_HISTORY) { st.baseRmssdHist.shift(); st.baseBpmHist.shift(); }
       st.baseRmssd = median(st.baseRmssdHist);
       st.baseBpm = cfg.BASELINE_BPM_STAT === 'median' ? median(st.baseBpmHist) : average(st.baseBpmHist);
-      if (cfg.THRESHOLD_MODE === 'noise' && st.rmssd > 0) updateNoise(ts);
+      if ((cfg.THRESHOLD_MODE === 'noise' || cfg.DETECTOR === 'window') && st.rmssd > 0) updateNoise(ts);
       if (!st.monitoring && st.baseRmssdHist.length >= cfg.MIN_BASELINE_SAMPLES) {
         st.monitoring = true;
         out.push({ kind: 'log', msg: 'Surveillance armed: phasic, tonic' + (cfg.QUIET_ENABLED ? ', quiet.' : '.') });
@@ -844,8 +909,14 @@ function createEngine(userConfig) {
     st.ans = classifyAns(st.rmssd, st.bpm, st.baseRmssd, st.baseBpm);
     trackResponse(ts, out);
 
-    let strict, raised;
-    if (cfg.THRESHOLD_MODE === 'noise') {
+    let strict, raised, winHit = false;
+    if (cfg.DETECTOR === 'window') {
+      strict = false; raised = false;
+      if (st.sigmaBpm !== null && st.baseRmssd > 0 && st.rmssd > 0) {
+        const dB = st.bpm - st.baseBpm, dL = Math.log(st.baseRmssd) - Math.log(st.rmssd);
+        winHit = dB >= Math.max(cfg.WINDOW_MIN_BPM_RISE, cfg.WINDOW_Z_BPM * st.sigmaBpm) && dL >= Math.max(cfg.WINDOW_MIN_LN_DROP, cfg.WINDOW_Z_RMSSD * st.sigmaLn);
+      }
+    } else if (cfg.THRESHOLD_MODE === 'noise') {
       if (st.sigmaBpm === null || !(st.baseRmssd > 0) || !(st.rmssd > 0)) { strict = false; raised = false; }
       else {
         const dB = st.bpm - st.baseBpm;                              // BPM above baseline
@@ -865,7 +936,7 @@ function createEngine(userConfig) {
 
     // After a trigger the rise must end once before a new trigger is possible. If the body
     // simply stays at the new level, the baseline catches up after the cooldown and releases it.
-    if (st.needRelease && st.monitoring && !(strict || raised)) st.needRelease = false;
+    if (st.needRelease && st.monitoring && !(strict || raised) && cfg.DETECTOR !== 'window') st.needRelease = false;
     const armed = !(cfg.REARM_AFTER_RELEASE && st.needRelease);
 
     if (st.monitoring && !inCooldown && armed) {
@@ -888,6 +959,8 @@ function createEngine(userConfig) {
       st.elevatedSince = null;
       st.tonicSeconds = 0;
     }
+
+    if (cfg.DETECTOR === 'window') windowStep(ts, winHit, inCooldown, out);
 
     quietStep(ts, true, false, st.cooldownUntil > 0, out);
     return out;
@@ -913,7 +986,7 @@ function createEngine(userConfig) {
       waitingRelease: !!(cfg.REARM_AFTER_RELEASE && st.needRelease),
       lastTs: st.lastTs, lastValidTs: st.lastValidTs,
       quiet: st.quietLast,
-      sigmaBpm: st.sigmaBpm, sigmaLn: st.sigmaLn
+      sigmaBpm: st.sigmaBpm, sigmaLn: st.sigmaLn, winFrac: st.winFrac, orientDeg: st.orientDeg
     };
   }
 
@@ -1050,7 +1123,7 @@ function feedShadows(s) {
     for (const o of sh.engine.ingest(s)) {
       if (o.kind !== 'event' || o.event.trigger_type === 'quiet_prolonged') continue;
       const e = o.event;
-      const mk = addMarker('shadow:' + sh.id + ':' + e.trigger_type, 'shadow', { bpm: e.trigger_bpm != null ? e.trigger_bpm : null, z_bpm: e.z_bpm, z_ln_rmssd: e.z_ln_rmssd, context: e.context || null });
+      const mk = addMarker('shadow:' + sh.id + ':' + e.trigger_type, 'shadow', { bpm: e.trigger_bpm != null ? e.trigger_bpm : null, z_bpm: e.z_bpm, z_ln_rmssd: e.z_ln_rmssd, window_fraction: e.window_fraction != null ? e.window_fraction : undefined, orientation_change_deg: e.orientation_change_deg != null ? e.orientation_change_deg : undefined, context: e.context || null });
       if (mk && e.timestamp && !isNaN(Date.parse(e.timestamp))) mk.ts = Date.parse(e.timestamp);
       log('Ombra "' + sh.id + '": ' + e.trigger_type + (e.context ? ' (' + e.context + ')' : '') + ' — solo registrato.');
     }
@@ -1331,7 +1404,7 @@ function ingestRows(rows) {
       continue;
     }
     lateRun = 0;
-    const es = { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err, blocker: (r.flags & 1) === 1, mov: r.mov == null ? null : r.mov };
+    const es = { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err, blocker: (r.flags & 1) === 1, mov: r.mov == null ? null : r.mov, ax: r.ax == null ? null : r.ax, ay: r.ay == null ? null : r.ay, az: r.az == null ? null : r.az };
     handleOutputs(engine.ingest(es));
     feedShadows(es);
   }
@@ -1890,9 +1963,9 @@ function samplesFromPayload(p) {
   return raw.filter(r => !(Array.isArray(r) && lateIx >= 0 && r[lateIx] === 1)).map(r => {
     if (Array.isArray(r)) {
       const flags = ix('flags') >= 0 ? r[ix('flags')] : 0;
-      return { ts: r[ix('ts')], ppi: r[ix('ppi')], hr: r[ix('hr')], err: ix('err') >= 0 ? r[ix('err')] : null, blocker: (flags & 1) === 1, mov: ix('mov') >= 0 && r[ix('mov')] != null ? r[ix('mov')] : null };
+      return { ts: r[ix('ts')], ppi: r[ix('ppi')], hr: r[ix('hr')], err: ix('err') >= 0 ? r[ix('err')] : null, blocker: (flags & 1) === 1, mov: ix('mov') >= 0 && r[ix('mov')] != null ? r[ix('mov')] : null, ax: ix('ax') >= 0 ? r[ix('ax')] : null, ay: ix('ay') >= 0 ? r[ix('ay')] : null, az: ix('az') >= 0 ? r[ix('az')] : null };
     }
-    return { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err == null ? null : r.err, blocker: !!(r.blocker || ((r.flags || 0) & 1)), mov: r.mov == null ? null : r.mov };
+    return { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err == null ? null : r.err, blocker: !!(r.blocker || ((r.flags || 0) & 1)), mov: r.mov == null ? null : r.mov, ax: r.ax == null ? null : r.ax, ay: r.ay == null ? null : r.ay, az: r.az == null ? null : r.az };
   });
 }
 
@@ -2089,6 +2162,8 @@ function enterPhase(i) {
   $('pacer').style.display = ph.pacer ? '' : 'none';
   $('tempoDot').style.display = ph.tempo ? '' : 'none';
   if (ph.tempo) $('tempoDot').style.animationDuration = ph.tempo + 's';
+  $('vidRow').style.display = ph.content ? '' : 'none';
+  if (ph.content) $('vidContent').value = ph.content;
   $('feltBtn').style.display = (ph.startle || ph.felt) ? '' : 'none';
   $('feltBtn').textContent = ph.felt ? 'Ho sentito una reazione (con l\'altra mano)' : 'Mi sono spaventato (con l\'altra mano)';
   showRating(i);
@@ -2444,7 +2519,10 @@ function showRating(i) {
   const prev = PROTOCOL[i - 1];
   const row = $('rateRow');
   if (!prev || !prev.rate) { row.style.display = 'none'; return; }
-  $('rateLbl').textContent = `Quanto eri attivato nella fase appena finita (${prev.title.toLowerCase()})? Da 1, calmo, a 5, molto attivato. Facoltativo, con l'altra mano.`;
+  const vid = !!prev.felt;
+  $('rateLbl').textContent = vid ? `Voto al video che hai appena visto: quanto ti ha attivato? Da 1, calmo, a 5, molto attivato. Con l'altra mano, serve per leggere i dati.` : `Quanto eri attivato nella fase appena finita (${prev.title.toLowerCase()})? Da 1, calmo, a 5, molto attivato. Facoltativo, con l'altra mano.`;
+  row.classList.toggle('attn', vid);
+  if (vid) buzz(60);
   const box = $('rateBtns'); box.textContent = '';
   for (const n of [1, 2, 3, 4, 5]) {
     const b = el('button', String(n), 'btn-secondary scale-btn'); b.type = 'button';
@@ -2471,6 +2549,7 @@ function initV13() {
   $('protoStartBtn').onclick = startProtocol;
   $('protoSkipBtn').onclick = () => { if (!proto.active) return; leavePhase('skipped'); enterPhase(proto.i + 1); };
   $('protoStopBtn').onclick = () => { if (proto.active && confirm('Interrompere il percorso?')) finishProtocol(true); };
+  $('vidContent').onchange = () => { const cur = PROTOCOL[proto.i]; if (cur && cur.content) { addMarker('cal:video:content', 'stimulus', { phase: cur.id, content: $('vidContent').value, planned: cur.content }); log('Segnato cosa guardi: ' + $('vidContent').selectedOptions[0].textContent + '.'); } };
   $('feltBtn').onclick = () => {
     const cur = PROTOCOL[proto.i];
     if (cur && cur.felt) { addMarker('cal:video:felt', 'stimulus', { phase: cur.id, since_phase_s: Math.round((Date.now() - proto.start) / 100) / 10 }); log('Segnata una reazione.'); buzz(40); return; }
@@ -2573,7 +2652,7 @@ function init() {
   };
   $('replayBtn').onclick = runReplay;
   $('replayFile').onchange = () => { if ($('replayFile').files.length) sel.value = 'file'; };
-  $('noiseBtn').onclick = () => { $('configBox').value = JSON.stringify(SHADOW_CONFIGS[0].cfg, null, 2); };
+  $('noiseBtn').onclick = () => { $('configBox').value = JSON.stringify(SHADOW_CONFIGS.find(x => x.id === 'rumore').cfg, null, 2); };
   $('compatBtn').onclick = () => { $('configBox').value = JSON.stringify(V1_1_COMPAT_CONFIG, null, 2); };
   $('resetCfgBtn').onclick = () => { $('configBox').value = '{}'; };
   $('applyLiveBtn').onclick = () => {
