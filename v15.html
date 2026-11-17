@@ -1,0 +1,2910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Body-Activated Diary - Engine v1.5</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #090d16; color: #f1f5f9; padding: 1.5rem; min-height: 100vh; display: flex; justify-content: center; }
+    .wrapper { max-width: 980px; width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 1.25rem; }
+    .wrapper > *, .two > *, .pathways > *, .grid-metrics > * { min-width: 0; }
+    html, body { overflow-x: hidden; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; background: #131b2e; padding: 1.25rem 1.5rem; border-radius: 14px; border: 1px solid #1e293b; }
+    h1 { font-size: 1.35rem; color: #38bdf8; font-weight: 700; }
+    h2 { font-size: 0.95rem; font-weight: 700; }
+    .subtitle { font-size: 0.8rem; color: #94a3b8; margin-top: 0.2rem; }
+    .status-pill { padding: 0.4rem 0.9rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: #334155; color: #94a3b8; white-space: nowrap; }
+    .status-pill.connected { background: #064e3b; color: #34d399; }
+    .status-pill.monitoring { background: #0284c7; color: #ffffff; }
+    .status-pill.triggered { background: #991b1b; color: #fca5a5; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .controls-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    button { padding: 0.7rem 1.25rem; border-radius: 8px; font-size: 0.875rem; font-weight: 600; border: none; cursor: pointer; transition: all 0.2s; }
+    .btn-primary { background: #0284c7; color: white; }
+    .btn-primary:hover { background: #0369a1; }
+    .btn-secondary { background: #1e293b; color: #cbd5e1; border: 1px solid #334155; }
+    .btn-secondary:hover { background: #334155; color: white; }
+    .btn-danger { background: #dc2626; color: white; }
+    .btn-danger:hover { background: #b91c1c; }
+    .btn-mock { background: #7c3aed; color: white; }
+    .btn-mock:hover { background: #6d28d9; }
+    .btn-small { padding: 0.45rem 0.8rem; font-size: 0.78rem; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input[type="text"], select, textarea { background: #0f172a; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px; padding: 0.6rem 0.75rem; font-size: 0.85rem; }
+    textarea { width: 100%; min-height: 4.5rem; font-family: ui-monospace, Consolas, monospace; font-size: 0.78rem; }
+    input[type="file"] { font-size: 0.8rem; color: #94a3b8; }
+
+    .grid-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+    .metric-card { background: #131b2e; border: 1px solid #1e293b; border-radius: 12px; padding: 1.2rem; text-align: center; }
+    .metric-title { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
+    .metric-val { font-size: 2.2rem; font-weight: 800; color: #f8fafc; }
+    .metric-unit { font-size: 0.75rem; color: #64748b; margin-top: 0.2rem; }
+    .metric-sub { font-size: 0.78rem; color: #38bdf8; margin-top: 0.5rem; }
+    .state-badge { display: inline-block; padding: 0.3rem 0.6rem; border-radius: 6px; font-size: 0.72rem; font-weight: 700; margin-top: 0.35rem; background: #0f172a; border: 1px solid #334155; color: #38bdf8; }
+    .ans-badge { display: inline-block; padding: 0.45rem 0.7rem; border-radius: 8px; font-size: 0.8rem; font-weight: 700; margin-top: 0.5rem; }
+    .ans-balanced { background: #1e293b; color: #cbd5e1; }
+    .ans-sympathetic { background: #7f1d1d; color: #fca5a5; }
+    .ans-coactivation { background: #581c87; color: #e9d5ff; }
+    .ans-parasympathetic { background: #064e3b; color: #6ee7b7; }
+
+    .pathways { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+    .box { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+    .box.panel { background: #131b2e; }
+    .box-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+    .box-title { font-size: 0.85rem; font-weight: 700; }
+    .tag { font-size: 0.65rem; font-weight: 700; padding: 0.2rem 0.5rem; border-radius: 6px; white-space: nowrap; }
+    .small { font-size: 0.75rem; color: #94a3b8; line-height: 1.45; }
+    .dim { color: #64748b; }
+    .progress-bar-bg { background: #1e293b; border-radius: 9999px; height: 8px; overflow: hidden; }
+    .progress-bar-fill { background: #38bdf8; height: 100%; width: 0%; transition: width 0.3s; }
+    .row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+    .spread { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+
+    .table-wrapper { overflow-x: auto; max-height: 300px; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    th { text-align: left; color: #94a3b8; font-weight: 600; padding: 0.5rem 0.6rem; border-bottom: 1px solid #1e293b; position: sticky; top: 0; background: #131b2e; white-space: nowrap; }
+    td { padding: 0.5rem 0.6rem; border-bottom: 1px solid #1e293b; white-space: nowrap; }
+    td.empty { text-align: center; color: #64748b; padding: 1.5rem; }
+    .type-tag { padding: 0.15rem 0.5rem; border-radius: 6px; font-size: 0.68rem; font-weight: 700; }
+    .type-phasic { background: #7f1d1d; color: #fca5a5; }
+    .type-tonic { background: #581c87; color: #e9d5ff; }
+    .type-quiet { background: #134e4a; color: #99f6e4; }
+
+    .logs-panel { background: #020617; color: #94a3b8; font-family: ui-monospace, Consolas, monospace; font-size: 0.74rem; padding: 0.9rem 1rem; border-radius: 12px; height: 170px; overflow-y: auto; border: 1px solid #1e293b; }
+    .log-line { margin-bottom: 0.2rem; }
+    pre { background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 0.75rem; font-size: 0.72rem; color: #94a3b8; overflow-x: auto; max-height: 260px; }
+    details summary { cursor: pointer; font-size: 0.78rem; color: #94a3b8; }
+
+    .proto-title { font-size: 1.5rem; font-weight: 800; color: #f8fafc; }
+    .proto-clock { font-size: 3rem; font-weight: 800; color: #38bdf8; font-variant-numeric: tabular-nums; }
+    .proto-text { font-size: 1rem; line-height: 1.5; color: #cbd5e1; }
+    #pacer { width: 90px; height: 90px; border-radius: 50%; background: #0284c7; margin: 0.5rem auto; animation: breathe 10s ease-in-out infinite; }
+    @keyframes tempo { 0% { opacity: 1; transform: scale(1.15); } 18% { opacity: 0.12; transform: scale(0.8); } 100% { opacity: 0.12; transform: scale(0.8); } }
+    #tempoDot { width: 56px; height: 56px; border-radius: 50%; background: #f59e0b; margin: 0.5rem auto; animation: tempo 4s linear infinite; }
+    @keyframes breathe { 0%, 100% { transform: scale(0.55); opacity: 0.6; } 50% { transform: scale(1.5); opacity: 1; } }
+    .two { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+    .field { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.75rem; color: #94a3b8; }
+    .field input { width: 100%; }
+    input[type="password"], input[type="number"] { background: #0f172a; color: #f1f5f9; border: 1px solid #334155; border-radius: 8px; padding: 0.6rem 0.75rem; font-size: 0.85rem; }
+    .modal { position: fixed; inset: 0; background: rgba(2, 6, 23, 0.92); display: flex; align-items: flex-start; justify-content: center; padding: 1rem; z-index: 50; overflow-y: auto; }
+    .modal[hidden] { display: none; }
+    .modal-card { margin: auto; background: #131b2e; border: 1px solid #334155; border-radius: 14px; padding: 1.25rem; width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 0.8rem; }
+    .scale-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.4rem; }
+    .scale-btn { padding: 0.6rem 0; font-size: 1rem; min-height: 3rem; }
+    .ends { display: flex; justify-content: space-between; font-size: 0.7rem; color: #94a3b8; margin-top: -0.4rem; }
+    .attn { outline: 2px solid #f59e0b; outline-offset: 3px; border-radius: 0.5rem; padding: 0.35rem; }
+    .scale-btn.picked { background: #0284c7; color: #fff; border-color: #0284c7; }
+    @media (max-width: 800px) {
+      body { padding: 0.75rem; }
+      header { flex-direction: column; align-items: flex-start; }
+      .two { grid-template-columns: 1fr; }
+      button { min-height: 2.75rem; }
+      .proto-clock { font-size: 2.6rem; }
+    }
+    @media (max-width: 800px) { .grid-metrics { grid-template-columns: repeat(2, 1fr); } .pathways { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <header>
+      <div>
+        <h1>Body-Activated Diary • Engine v1.5</h1>
+        <div class="subtitle">Guided calibration • check-ins • GitHub upload • raw PPI recording • offline replay</div>
+      </div>
+      <div id="statusPill" class="status-pill">Disconnected</div>
+    </header>
+
+    <div class="controls-bar">
+      <button id="connectBtn" class="btn-primary">Connect Polar Verity Sense</button>
+      <button id="simBtn" class="btn-secondary">Prova senza sensore</button>
+      <button id="simBoostBtn" class="btn-mock" style="display:none;">Simula stimolo (40 s)</button>
+      <button id="endBtn" class="btn-secondary">Chiudi sessione</button>
+      <label class="small"><input type="checkbox" id="wakeChk" checked> Schermo sempre acceso</label>
+      <label class="small"><input type="checkbox" id="accChk" checked> Accelerometro acceso (movimento e orientamento del braccio)</label>
+      <label class="small"><input type="checkbox" id="ppgChk"> Registra anche il PPG grezzo (pesante, circa 1 KB al secondo: solo per calibrazione e prove)</label>
+      <span id="wakeNote" class="small" style="color:#fbbf24;"></span>
+    </div>
+    <div class="controls-bar">
+      <input id="markerInput" type="text" placeholder="Marker, e.g. clip starts" style="flex: 1; min-width: 180px;">
+      <button id="markerBtn" class="btn-secondary">Add marker</button>
+      <button id="exportRecBtn" class="btn-secondary">Export recording (.json)</button>
+    </div>
+
+    <!-- Guided calibration -->
+    <div class="box panel">
+      <div class="spread">
+        <span class="box-title">Calibrazione guidata</span>
+        <span id="protoStatus" class="tag" style="background:#1e293b; color:#cbd5e1;">Non avviata</span>
+      </div>
+      <div class="small">Una sequenza di riposo, respirazione, in piedi, calcolo a mente, suono improvviso e camminata, con pause in mezzo (<span id="protoTotal"></span>). I marker di ogni fase entrano da soli nella registrazione. Sensore sul braccio, meglio la parte alta, e non digitare durante le fasi da seduto. Ripetila 2 o 3 volte nella giornata, per esempio prima e dopo il caffè. Il percorso video usa un altro schermo (il portatile) per tre video da 3 minuti, con pause: la pagina segna solo le fasi.</div>
+      <div id="ctxBox" class="two" style="margin: 0.5rem 0;">
+        <label class="field">Dove hai il sensore<select id="ctxPlace"></select></label>
+        <label class="field">Caffè o altro stimolante<select id="ctxCaf"></select></label>
+        <label class="field">Sonno della scorsa notte<select id="ctxSleep"></select></label>
+        <label class="field">Come sei adesso<select id="ctxTired"></select></label>
+        <label class="field">Il suono di prova, come lo senti<select id="ctxVol"></select></label>
+      </div>
+      <div class="row" style="margin-bottom:0.5rem;">
+        <button id="volTestBtn" class="btn-secondary btn-small" type="button">Prova il volume (un tono)</button>
+        <label class="small"><input id="cueSilent" type="checkbox" checked> Segnali di fase solo con vibrazione</label>
+      </div>
+      <div class="row">
+        <select id="protoSel" style="max-width: 11rem;"><option value="base">Percorso base</option><option value="video">Percorso video</option><option value="states">Verifica stati (9 min)</option></select>
+        <input id="protoNote" type="text" placeholder="Nota (es. dopo il caffè)" style="flex:1; min-width: 180px;">
+        <button id="protoStartBtn" class="btn-primary">Avvia percorso</button>
+      </div>
+      <div id="protoRun" style="display:none; text-align:center;">
+        <div id="protoStep" class="small"></div>
+        <div id="protoTitle" class="proto-title"></div>
+        <div id="pacer" style="display:none;"></div>
+        <div id="tempoDot" style="display:none;"></div>
+        <div id="protoText" class="proto-text"></div>
+        <div id="protoClock" class="proto-clock"></div>
+        <div id="rateRow" style="display:none; margin:0.5rem 0;">
+          <div id="rateLbl" class="small"></div>
+          <div id="rateBtns" class="row" style="justify-content:center;"></div>
+        </div>
+        <div id="vidRow" style="display:none; margin:0.5rem 0;">
+          <label class="field">Cosa stai guardando<select id="vidContent"><option value="neutral">Neutro</option><option value="fear">Paura (horror)</option><option value="arousing">Alta attivazione</option><option value="other">Altro</option></select></label>
+        </div>
+        <div class="progress-bar-bg"><div id="protoBar" class="progress-bar-fill"></div></div>
+        <div class="row" style="justify-content:center; margin-top:0.75rem;">
+          <button id="feltBtn" class="btn-mock" style="display:none;">Mi sono spaventato (con l'altra mano)</button>
+          <button id="protoSkipBtn" class="btn-secondary btn-small">Salta fase</button>
+          <button id="protoStopBtn" class="btn-danger btn-small">Interrompi</button>
+        </div>
+      </div>
+      <details><summary>Le fasi</summary><ol id="protoList" class="small" style="padding-left:1.2rem; margin-top:0.4rem;"></ol></details>
+    </div>
+
+    <!-- Sensor capabilities -->
+    <div class="box panel">
+      <span class="box-title">Capacità del sensore</span>
+      <div class="small">Legge dal sensore collegato quali misure offre (per esempio l'accelerometro insieme agli intervalli), lo stato della modalità SDK, il firmware e la batteria. Non cambia niente sul sensore e non interrompe la registrazione. Il risultato entra anche nei dati. La prova dell'accelerometro lo accende per 30 secondi insieme agli intervalli (10 s fermo, 10 s in movimento, 10 s fermo) e lo spegne: serve a vedere se i due flussi arrivano insieme.</div>
+      <div class="row">
+        <button id="capBtn" class="btn-secondary" type="button">Controlla il sensore</button>
+        <button id="accBtn" class="btn-secondary" type="button">Prova accelerometro (30 s)</button>
+        <button id="ppgBtn" class="btn-secondary" type="button">Prova PPG grezzo (30 s)</button>
+        <button id="capCopyBtn" class="btn-secondary btn-small" type="button" style="display:none;">Copia</button>
+      </div>
+      <pre id="capOut" class="small" style="display:none; white-space:pre-wrap; word-break:break-word; margin-top:0.5rem;"></pre>
+    </div>
+
+    <div class="two">
+      <!-- Check-ins -->
+      <div class="box panel">
+        <span class="box-title">Check-in casuali</span>
+        <div class="small">Ogni tanto la pagina chiede come stai. Serve a dare un'etichetta ai momenti spontanei. Vale solo con la pagina aperta e il sensore collegato.</div>
+        <label class="small"><input type="checkbox" id="ciEnabled"> Attivi</label>
+        <div class="row">
+          <label class="field">Ogni (min)<input id="ciMin" type="number" min="1" style="width:5rem;"></label>
+          <label class="field">fino a (min)<input id="ciMax" type="number" min="1" style="width:5rem;"></label>
+          <label class="field">dalle ore<input id="ciFrom" type="number" min="0" max="23" style="width:4.5rem;"></label>
+          <label class="field">alle ore<input id="ciTo" type="number" min="1" max="24" style="width:4.5rem;"></label>
+        </div>
+        <div id="ciInfo" class="small" style="color:#38bdf8;"></div>
+        <div><button id="ciNowBtn" class="btn-secondary btn-small">Check-in adesso</button></div>
+      </div>
+
+      <!-- GitHub upload -->
+      <div class="box panel">
+        <span class="box-title">Salvataggio su GitHub</span>
+        <div class="small">Ogni due minuti la pagina carica i nuovi campioni in un repository privato tuo. Il token resta solo su questo telefono: creane uno con accesso solo a quel repository, permesso Contents in lettura e scrittura, e scadenza breve.</div>
+        <div class="row">
+          <label class="field" style="flex:1;">Proprietario<input id="ghOwner" type="text" autocapitalize="off" autocomplete="off"></label>
+          <label class="field" style="flex:1;">Repository<input id="ghRepo" type="text" autocapitalize="off" autocomplete="off"></label>
+        </div>
+        <div class="row">
+          <label class="field" style="flex:1;">Ramo<input id="ghBranch" type="text" autocapitalize="off" autocomplete="off"></label>
+          <label class="field" style="flex:1;">Cartella<input id="ghFolder" type="text" autocapitalize="off" autocomplete="off"></label>
+        </div>
+        <label class="field">Token<input id="ghToken" type="password" autocomplete="off"></label>
+        <label class="small"><input type="checkbox" id="ghAuto"> Carica da solo ogni 2 minuti</label>
+        <div class="row">
+          <button id="ghTestBtn" class="btn-secondary btn-small">Prova</button>
+          <button id="ghNowBtn" class="btn-secondary btn-small">Carica ora</button>
+          <button id="ghForgetBtn" class="btn-danger btn-small">Dimentica il token</button>
+        </div>
+        <div id="syncStatus" class="small" style="color:#38bdf8;"></div>
+      </div>
+    </div>
+
+    <!-- Check-in dialog -->
+    <div id="checkinModal" class="modal" hidden>
+      <div class="modal-card">
+        <h2 id="ciTitle" style="font-size:1.1rem;">Come stai in questo momento?</h2>
+        <div id="ciTriggerInfo" class="small" style="color:#fca5a5; display:none;"></div>
+        <div class="small">Quanto è piacevole o spiacevole?</div>
+        <div id="valRow" class="scale-row"></div>
+        <div class="ends"><span>molto spiacevole</span><span>molto piacevole</span></div>
+        <div class="small">Quanto ti senti carico o agitato?</div>
+        <div id="aroRow" class="scale-row"></div>
+        <div class="ends"><span>molto calmo</span><span>molto carico</span></div>
+        <label class="field">Cosa stai facendo<select id="actSel"></select></label>
+        <input id="ciNote" type="text" placeholder="Una riga, se vuoi">
+        <div class="row">
+          <button id="ciSave" class="btn-primary" disabled>Salva</button>
+          <button id="ciLater" class="btn-secondary">Tra 10 minuti</button>
+          <button id="ciSkip" class="btn-secondary">Salta</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live metrics -->
+    <div class="grid-metrics">
+      <div class="metric-card">
+        <div class="metric-title">Live Heart Rate</div>
+        <div id="liveBpm" class="metric-val">--</div>
+        <div class="metric-unit">BPM</div>
+        <div id="baseBpm" class="metric-sub">Base: -- BPM</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Live HRV (rMSSD)</div>
+        <div id="liveRmssd" class="metric-val">--</div>
+        <div class="metric-unit">ms, recent valid beats (max 45 s)</div>
+        <div id="baseRmssd" class="metric-sub">Median: -- ms</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Autonomic Balance (ANS)</div>
+        <div id="ansState" class="ans-badge ans-balanced">BALANCED</div>
+        <div><span id="bioState" class="state-badge">Stato: STILL_REST</span></div>
+        <div class="metric-unit" style="margin-top: 0.5rem;">ANS: descriptive label, not used by the triggers. Stato: from the arm accelerometer (v1.5); it only gates the triggers in the "stati" shadow engine.</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-title">Cooldown</div>
+        <div id="cooldownVal" class="metric-val" style="font-size: 1.5rem; line-height: 2.2rem;">READY</div>
+        <div class="metric-unit">After a phasic or tonic trigger</div>
+        <div id="freezeStatus" class="metric-sub">Baseline: active</div>
+      </div>
+    </div>
+
+    <!-- Pathways -->
+    <div class="pathways">
+      <div class="box">
+        <div class="box-header">
+          <span class="box-title">1 · Phasic</span>
+          <span class="tag" style="background: #7f1d1d; color: #fca5a5;">ON ONE SAMPLE</span>
+        </div>
+        <div id="phasicRule" class="small"></div>
+      </div>
+      <div class="box">
+        <div class="box-header">
+          <span class="box-title">2 · Tonic</span>
+          <span class="tag" style="background: #581c87; color: #e9d5ff;">PERSISTENCE</span>
+        </div>
+        <div id="tonicRule" class="small"></div>
+        <div class="progress-bar-bg"><div id="tonicProgressBar" class="progress-bar-fill" style="background: #a855f7;"></div></div>
+        <div id="tonicCounterText" class="small" style="color: #a855f7;">Persistence: 0s</div>
+      </div>
+      <div class="box">
+        <div class="box-header">
+          <span class="box-title">3 · Prolonged quiet</span>
+          <span class="tag" style="background: #134e4a; color: #99f6e4;">HYPOTHESIS · NO SOUND</span>
+        </div>
+        <div id="quietRule" class="small"></div>
+        <div class="progress-bar-bg"><div id="quietProgressBar" class="progress-bar-fill" style="background: #2dd4bf;"></div></div>
+        <div id="quietText" class="small" style="color: #2dd4bf;">Waiting for data</div>
+      </div>
+    </div>
+
+    <!-- Baseline + signal -->
+    <div class="box panel">
+      <div class="spread">
+        <span class="box-title">Baseline learning buffer</span>
+        <span id="bufferCounter" class="small" style="color: #38bdf8;">0 samples</span>
+      </div>
+      <div class="progress-bar-bg"><div id="progressBar" class="progress-bar-fill"></div></div>
+      <div id="signalText" class="small">Not connected. Connect the sensor, or try a synthetic scenario in the replay panel below.</div>
+      <div id="recText" class="small dim">Recording: not started.</div>
+    </div>
+
+    <!-- Events -->
+    <div class="box panel">
+      <div class="spread">
+        <h2>Events from the live sensor</h2>
+        <div class="row">
+          <span id="eventCountBadge" class="small">0 events</span>
+          <button id="exportJsonBtn" class="btn-secondary btn-small">Export events (.json)</button>
+          <button id="clearStorageBtn" class="btn-danger btn-small">Clear events</button>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Time</th><th>Type</th><th>BPM</th><th>Ref BPM</th><th>rMSSD</th><th>Ref rMSSD</th><th>ANS</th><th>Drop</th><th>Onset → trigger</th><th>Peaks after</th></tr></thead>
+          <tbody id="eventsBody"><tr><td colspan="10" class="empty">No triggers recorded yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Replay -->
+    <div class="box panel">
+      <h2>Replay: run the engine on a recording</h2>
+      <div class="small">Load a recording exported from this page, or pick a synthetic scenario. The same engine code runs on it, with the overrides written below. Results stay in this panel: nothing is added to the live events.</div>
+      <div class="row">
+        <select id="replaySource"></select>
+        <input id="replayFile" type="file" accept=".json,.zip,application/json,application/zip">
+      </div>
+      <div class="small">Config overrides (JSON). Empty <code>{}</code> = defaults.</div>
+      <textarea id="configBox" spellcheck="false">{}</textarea>
+      <div class="row">
+        <button id="replayBtn" class="btn-mock">Run replay</button>
+        <button id="batchZipBtn" class="btn-secondary btn-small" style="display:none;">Confronta tutte le sessioni dello ZIP</button>
+        <button id="exportMergedZipBtn" class="btn-secondary btn-small" style="display:none;">Esporta sessioni unite (.json)</button>
+        <button id="noiseBtn" class="btn-secondary btn-small">Fill with noise-unit thresholds (v1.4 shadow)</button>
+        <button id="windowBtn" class="btn-secondary btn-small">Fill with window detector (v1.4.1 shadow)</button>
+        <button id="stateBtn" class="btn-secondary btn-small">Fill with activity states (v1.5 shadow "stati")</button>
+        <button id="compatBtn" class="btn-secondary btn-small">Fill with v1.1-like overrides</button>
+        <button id="resetCfgBtn" class="btn-secondary btn-small">Reset to {}</button>
+        <button id="applyLiveBtn" class="btn-secondary btn-small">Use these overrides for the live engine (restarts the baseline)</button>
+      </div>
+      <div id="replaySummary" class="small"></div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Time</th><th>Type</th><th>BPM</th><th>Ref BPM</th><th>rMSSD</th><th>Ref rMSSD</th><th>ANS</th><th>Drop</th><th>Onset → trigger</th><th>Peaks after</th></tr></thead>
+          <tbody id="replayBody"><tr><td colspan="10" class="empty">No replay run yet.</td></tr></tbody>
+        </table>
+      </div>
+      <details>
+        <summary>All config keys and their defaults</summary>
+        <pre id="defaultsPre"></pre>
+      </details>
+    </div>
+
+    <!-- Stored recordings -->
+    <div class="box panel">
+      <div class="spread">
+        <h2>Recordings kept in this browser</h2>
+        <span id="storageNote" class="small dim"></span>
+      </div>
+      <div class="table-wrapper" style="max-height: 200px;">
+        <table>
+          <thead><tr><th>Started</th><th>Device</th><th>Samples</th><th>Markers</th><th></th></tr></thead>
+          <tbody id="sessionsBody"><tr><td colspan="5" class="empty">None yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="logs-panel" id="terminalLogs">
+      <div class="log-line">// Body-Activated Diary engine v1.5 loaded.</div>
+    </div>
+  </div>
+
+  <script>
+// ============================================================================
+// ENGINE CORE v1.3 — pure logic: no DOM, no Bluetooth, no wall clock.
+// Feed it samples with ingest({ ts, ppi, hr, err, blocker }) and it returns
+// what happened (events, event updates, log lines). Time comes only from the
+// sample timestamps, so the same code runs live and on a recording (replay).
+// ============================================================================
+const ENGINE_VERSION = '1.5.0';
+
+// All values are starting points, not validated thresholds.
+const DEFAULT_CONFIG = {
+  // --- Sample quality gate
+  PPI_MIN_MS: 300,
+  PPI_MAX_MS: 2000,
+  ERROR_ESTIMATE_MAX_MS: 30,        // Polar: above 30 ms likely artefact. null = filter off (v1.1 behaviour)
+  MAX_SAMPLE_GAP_S: 10,             // no valid sample for this long = discontinuity
+
+  // --- rMSSD
+  RMSSD_BUFFER_SIZE: 30,
+  RMSSD_MIN_PAIRS: 4,               // v1.1 asked for 5 intervals = 4 differences
+  RMSSD_ADJACENT_ONLY: true,        // skip differences across a discarded beat. false = v1.1 behaviour
+  RMSSD_MAX_SPAN_S: 45,             // v1.3: beats older than this are dropped from the rMSSD buffer, so a long hole in the
+                                    // signal cannot leave a stale value standing in. null = no limit (v1.1, v1.2). A longer
+                                    // buffer (RMSSD_BUFFER_SIZE 60) needs a longer span (about 90).
+  BPM_FROM_PPI: true,               // v1.3: BPM = 60000 / mean PPI of the last BPM_PPI_BEATS beats. false = the sensor's own
+                                    // HR field (v1.1, v1.2), which showed 37 BPM for a minute on 12 Nov 2026
+  BPM_PPI_BEATS: 8,
+
+  // --- Baseline (same as v1.1 unless a flag is changed)
+  MIN_BASELINE_SAMPLES: 20,
+  MAX_BASELINE_HISTORY: 80,
+  BASELINE_BPM_STAT: 'mean',        // 'mean' (v1.1) | 'median'
+  FREEZE_BASELINE_WHILE_ELEVATED: true,  // baseline stops following a rise in progress. false = v1.1 behaviour
+  REARM_AFTER_RELEASE: true,        // after a trigger, no new one until the rise has ended once. false = v1.1 behaviour
+
+  // --- Pathway 1: phasic
+  PHASIC_DROP_PERCENT: 0.35,
+  PHASIC_BPM_RISE: 10,
+  PHASIC_MAX_ONSET_S: null,         // null = v1.1 rule (fires whenever thresholds are met).
+                                    // A number = phasic only if reached within N s from the start of the rise.
+  PHASIC_MIN_S: 8,                  // v1.3: the strict thresholds must hold this long (on valid samples) before a phasic
+                                    // trigger. 0 = on one sample (v1.1, v1.2). A first value, to tune with labelled data.
+
+  // --- Movement context (v1.3, hypothesis from 5 candidate triggers on one person, not validated)
+  MOVEMENT_CONTEXT: 'tag',          // 'tag' = a trigger preceded by a lot of movement is kept in the log but marked
+                                    // (context 'movement', notify false: no chime, no invite). 'off' = every trigger notifies (v1.1 to v1.3 first build).
+  MOVEMENT_WINDOW_S: 20,            // look-back before the trigger
+  MOVEMENT_BLOCKED_FRACTION: 0.15,  // share of samples in the window with the sensor's movement bit
+
+  // --- v1.4 (replay experiment): movement from the accelerometer, thresholds in units of the person's own noise
+  MOVEMENT_SOURCE: 'acc',           // 'acc' = share of samples with mov >= MOVEMENT_MOV_MG (falls back to the blocker bit
+                                    // when the sample has no accelerometer value). 'blocker' = v1.3.1 behaviour.
+  MOVEMENT_MOV_MG: 40,              // sd of the acceleration magnitude over 2 s, milli-g (indicative value, 3_Sistema 4.12)
+  THRESHOLD_MODE: 'percent',        // 'percent' (v1.3.1, default) | 'noise'. In 'noise' mode the PHASIC_/TONIC_ percent and BPM
+                                    // values above are not used; the Z values below are.
+  NOISE_WINDOW_MIN: 10,             // robust spread (MAD) of BPM and ln(rMSSD) over this many minutes of unfrozen samples
+  NOISE_MIN_MIN: 3,                 // minutes of history before the spread exists; until then no trigger in noise mode
+  NOISE_SAMPLE_EVERY_S: 5,          // thinning, because consecutive rMSSD values overlap
+  NOISE_MIN_SIGMA_BPM: 1.5,         // floors, so a very quiet stretch does not make tiny changes look big
+  NOISE_MIN_SIGMA_LN: 0.10,
+  NOISE_MIN_BPM_RISE: 4,            // absolute minimum effect, whatever the spread
+  NOISE_MIN_LN_DROP: 0.25,          // about -22 % rMSSD
+  PHASIC_Z_BPM: 3.5,
+  PHASIC_Z_RMSSD: 3.0,
+  TONIC_Z_BPM: 2.5,
+  TONIC_Z_RMSSD: 2.0,
+
+  // --- v1.4.1: window detector (used by the shadow engine 'finestra'). Instead of two thresholds crossed at the same moment for N seconds, it
+  // looks at the last WINDOW_S seconds of valid samples: the share of samples that are above soft thresholds (in units of the person's own
+  // noise, see THRESHOLD_MODE 'noise') must reach WINDOW_FRACTION. It does not fire if the orientation of the arm changed (posture).
+  DETECTOR: 'threshold',            // 'threshold' (v1.3.1 rules) | 'window'
+  WINDOW_S: 45,
+  WINDOW_MIN_N: 20,                 // valid samples needed in the window
+  WINDOW_FRACTION: 0.6,             // share of samples in the window that must be 'hot' to fire
+  WINDOW_HOLD_FRACTION: 0.3,        // above this share the baseline is frozen and a new trigger waits for the share to fall below it
+  WINDOW_Z_BPM: 1.5,
+  WINDOW_Z_RMSSD: 1.0,
+  WINDOW_MIN_BPM_RISE: 3,
+  WINDOW_MIN_LN_DROP: 0.15,
+  ORIENT_GATE: true,                // needs ax, ay, az on the samples; without them the gate does nothing
+  ORIENT_CHANGE_DEG: 25,            // angle between the arm direction 150..45 s ago and in the last 10 s (indicative: one stand-up gave 32 deg)
+  ORIENT_REF_START_S: 150,
+  ORIENT_REF_END_S: 45,
+  ORIENT_NOW_S: 10,
+
+  // --- v1.5: activity states (right arm sensor). Off by default: it runs as a shadow engine ('stati') until a labelled
+  // session ("Verifica stati") shows the states match what the person was doing.
+  STATE_MACHINE_MODE: false,        // true = the state gates the baseline and the triggers
+  LOCO_WINDOW_S: 30,                // window used to tell continuous walking from the intermittent gestures of a right arm
+  LOCO_MOV_MG: 55,                  // mG: a sample above this counts as walking (indicative, no walking data yet)
+  LOCO_FRACTION: 0.55,              // share of samples in the window above LOCO_MOV_MG that makes it LOCOMOTION
+  GESTURE_MOV_MG: 35,               // mG: intermittent hand/arm activity (mouse, typing, talking)
+  GESTURE_FRACTION: 0.12,           // share of samples above GESTURE_MOV_MG that makes it DESK_OR_GESTURE
+  RECOVERY_MAX_S: 75,               // after walking, no trigger while BPM stays above baseline + margin, for at most this long
+  RECOVERY_BPM_MARGIN: 6,
+  TRANSITION_MOV_MG: 65,            // a movement burst this strong starts a posture change
+  TRANSITION_PENDING_S: 90,         // the burst waits this long for the arm direction to confirm the change (stand-up: burst at
+                                    // about 25-35 s, 30 deg reached at about 55 s or later)
+  TRANSITION_DEG: 30,               // arm direction change that confirms the posture change
+  TRANSITION_HOLD_S: 90,            // after the confirmation, no trigger for this long (BPM stays up about 90 s after standing)
+  TRANSITION_MAX_S: 240,            // a new strong burst during the hold (sitting down again) restarts it, up to this total length
+
+  // --- Pathway 2: tonic
+  TONIC_DROP_PERCENT: 0.30,
+  TONIC_BPM_RISE: 5,
+  TONIC_PERSISTENCE_SECONDS: 30,
+
+  COOLDOWN_SECONDS: 300,
+  RESPONSE_WINDOW_SECONDS: 120,     // after a trigger, keep measuring peaks for this long
+
+  // --- Pathway 3: prolonged quiet (ADR-24, hypothesis)
+  QUIET_ENABLED: true,
+  QUIET_SLOW_WINDOW_MIN: 45,        // slow reference: median of the last N minutes
+  QUIET_MIN_HISTORY_MIN: 30,        // minutes of data needed before the slow reference exists
+  QUIET_DURATION_MIN: 15,           // how long the quiet must last
+  QUIET_BPM_MARGIN: 2,              // BPM <= reference + margin
+  QUIET_RMSSD_TOLERANCE: 0.25,      // rMSSD >= reference * (1 - tolerance); a 30-beat rMSSD is noisy, 10% was too tight
+  QUIET_MIN_OK_FRACTION: 0.90,      // share of valid samples in the window that meet the condition
+  QUIET_MIN_VALID_FRACTION: 0.70,   // share of samples in the window that passed the quality gate
+  QUIET_MAX_MOVED_FRACTION: 0.05,   // share of samples with the blocker bit (movement proxy, no accelerometer yet)
+  QUIET_MAX_GAP_S: 60,              // a hole this long inside the window invalidates it
+  QUIET_REARM_FRACTION: 0.50,       // after an invite, re-arm only once the quiet has clearly ended
+  QUIET_MAX_PER_DAY: 2,
+  QUIET_HOURS_START: 23,            // no invite between these local hours (start == end = no silent hours)
+  QUIET_HOURS_END: 7,
+  REST_BPM: null,                   // resting values from calibration, when they exist.
+  REST_RMSSD: null                  // null = use the slow reference instead
+};
+
+// Overrides that make v1.3 decide like v1.1 (except the tonic timer, which now counts on samples).
+const V1_1_COMPAT_CONFIG = {
+  ERROR_ESTIMATE_MAX_MS: null,
+  RMSSD_ADJACENT_ONLY: false,
+  RMSSD_MAX_SPAN_S: null,
+  BPM_FROM_PPI: false,
+  PHASIC_MIN_S: 0,
+  MOVEMENT_CONTEXT: 'off',
+  FREEZE_BASELINE_WHILE_ELEVATED: false,
+  REARM_AFTER_RELEASE: false,
+  PHASIC_MAX_ONSET_S: null,
+  QUIET_ENABLED: false,
+  MOVEMENT_SOURCE: 'blocker',
+  THRESHOLD_MODE: 'percent',
+  DETECTOR: 'threshold',
+  STATE_MACHINE_MODE: false
+};
+// v1.3.1 exactly (for before/after comparisons)
+const V1_3_1_CONFIG = { MOVEMENT_SOURCE: 'blocker', THRESHOLD_MODE: 'percent' };
+// Shadow engines (v1.4): they see the same beats as the live engine, write their events as markers (kind 'shadow') and never
+// notify. Exploratory presets, chosen on a few sessions of one person: they exist to be compared on the next recordings.
+const SHADOW_CONFIGS = [
+  { id: 'stati', label: 'v1.5: stati di attività (camminata, recupero, cambio di postura) + finestra 45 s + cancello di orientamento',
+    cfg: { STATE_MACHINE_MODE: true, DETECTOR: 'window', THRESHOLD_MODE: 'noise', ORIENT_GATE: true, QUIET_ENABLED: false } },
+  { id: 'finestra', label: 'frazione di campioni oltre soglie morbide in 45 s, non se cambia l\'orientamento del braccio',
+    cfg: { DETECTOR: 'window', QUIET_ENABLED: false } },
+  { id: 'rumore', label: 'soglie in unità di rumore personale',
+    cfg: { THRESHOLD_MODE: 'noise', PHASIC_Z_BPM: 2.5, PHASIC_Z_RMSSD: 1.5, TONIC_Z_BPM: 2.0, TONIC_Z_RMSSD: 1.0, QUIET_ENABLED: false } },
+  { id: 'solo_bpm', label: 'solo battito, in unità di rumore',
+    cfg: { THRESHOLD_MODE: 'noise', PHASIC_Z_BPM: 3.5, TONIC_Z_BPM: 2.5, PHASIC_Z_RMSSD: -99, TONIC_Z_RMSSD: -99, NOISE_MIN_LN_DROP: -99, QUIET_ENABLED: false } }
+];
+
+function median(arr) {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+function average(arr) {
+  if (arr.length === 0) return 0;
+  return Math.round(arr.reduce((a, v) => a + v, 0) / arr.length);
+}
+
+// buf: [{ ppi, adj }] where adj = this beat directly follows the previous entry
+function computeRmssd(buf, cfg) {
+  let sum = 0, pairs = 0;
+  for (let i = 1; i < buf.length; i++) {
+    if (cfg.RMSSD_ADJACENT_ONLY && !buf[i].adj) continue;
+    const d = buf[i].ppi - buf[i - 1].ppi;
+    sum += d * d;
+    pairs++;
+  }
+  if (pairs < cfg.RMSSD_MIN_PAIRS) return null;
+  return Math.round(Math.sqrt(sum / pairs));
+}
+
+function classifyAns(rmssd, bpm, baseRmssd, baseBpm) {
+  if (!baseRmssd) return 'BALANCED';
+  const ratio = rmssd / baseRmssd;
+  const delta = bpm - baseBpm;
+  if (ratio < 0.60 && delta >= 8) return 'SYMPATHETIC';
+  if (ratio >= 0.60 && ratio <= 0.80 && delta >= 4 && delta < 10) return 'CO_ACTIVATION';
+  if (ratio >= 0.85 && delta <= 2) return 'PARASYMPATHETIC';
+  return 'BALANCED';
+}
+
+function createEngine(userConfig) {
+  const cfg = Object.assign({}, DEFAULT_CONFIG, userConfig || {});
+  const st = {
+    total: 0, accepted: 0,
+    rejected: { blocker: 0, range: 0, hr: 0, error_estimate: 0 },
+    ppiBuf: [], prevAccepted: false, lastValidTs: null, lastTs: null,
+    bpm: 0, rmssd: null,
+    baseRmssdHist: [], baseBpmHist: [], baseRmssd: 0, baseBpm: 0,
+    monitoring: false, cooldownUntil: 0,
+    elevatedSince: null, tonicSeconds: 0, needRelease: false,
+    moveRing: [],
+    noise: [], noiseLastTs: 0, sigmaBpm: null, sigmaLn: null,
+    orient: [], win: [], winHot: false, winFrac: 0, orientDeg: null, orientLogged: false,
+    actState: 'STILL_REST', locoRing: [], lastLocoTs: null, burstTs: null, transUntilTs: 0, transStartTs: 0,
+    stateCounts: { STILL_REST: 0, DESK_OR_GESTURE: 0, TRANSITION_HOLD: 0, LOCOMOTION: 0, RECOVERY: 0 },
+    suppressedByState: 0,
+    ans: 'BALANCED',
+    tracking: null,
+    // quiet pathway
+    slow: [], slowHead: 0, slowRefBpm: null, slowRefRmssd: null, slowRefAt: null,
+    qwin: [], qHead: 0, qAll: 0, qValid: 0, qOk: 0, qMoved: 0,
+    qLastValidTs: null, qLastGapTs: null,
+    quietArmed: true, quietDay: null, quietCount: 0, quietLast: null
+  };
+
+  function rejectReason(s) {
+    if (s.blocker) return 'blocker';
+    if (!(s.ppi >= cfg.PPI_MIN_MS && s.ppi <= cfg.PPI_MAX_MS)) return 'range';
+    if (!(s.hr > 0)) return 'hr';
+    if (cfg.ERROR_ESTIMATE_MAX_MS != null && s.err != null && s.err > cfg.ERROR_ESTIMATE_MAX_MS) return 'error_estimate';
+    return null;
+  }
+
+  function inQuietHours(ts) {
+    const a = cfg.QUIET_HOURS_START, b = cfg.QUIET_HOURS_END;
+    if (a == null || b == null || a === b) return false;
+    const h = new Date(ts).getHours();
+    return a > b ? (h >= a || h < b) : (h >= a && h < b);
+  }
+
+  function dayKey(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+  }
+
+  function makeEvent(type, ts, extra) {
+    return Object.assign({
+      id: 'evt_' + Math.round(ts),
+      timestamp: new Date(ts).toISOString(),
+      engine_version: ENGINE_VERSION,
+      is_mock: false,
+      source: 'sensor',
+      trigger_type: type,
+      activity_state: st.actState,
+      ans_state: st.ans,
+      trigger_bpm: st.bpm,
+      baseline_bpm: st.baseBpm,
+      trigger_rmssd: st.rmssd,
+      baseline_rmssd_median: st.baseRmssd,
+      drop_percentage: st.baseRmssd > 0 ? Math.round((1 - st.rmssd / st.baseRmssd) * 100) : null,
+      status: 'pending_reflection',
+      user_valence: null,
+      user_reflection: null
+    }, extra || {});
+  }
+
+  function movementShare() {
+    if (!st.moveRing.length) return 0;
+    if (cfg.MOVEMENT_SOURCE === 'acc') {
+      let n = 0, m = 0;
+      for (const r of st.moveRing) if (r.m != null) { n++; if (r.m >= cfg.MOVEMENT_MOV_MG) m++; }
+      if (n > 0) return m / n;
+    }
+    let b = 0;
+    for (const r of st.moveRing) if (r.b) b++;
+    return b / st.moveRing.length;
+  }
+
+  function mad(arr) {
+    const m = median(arr.slice().sort((a, b) => a - b).map(x => x * 1000)) / 1000;
+    const d = arr.map(x => Math.abs(x - m)).sort((a, b) => a - b);
+    const mid = Math.floor(d.length / 2);
+    const md = d.length % 2 ? d[mid] : (d[mid - 1] + d[mid]) / 2;
+    return 1.4826 * md;
+  }
+
+  function updateNoise(ts) {
+    if (ts - st.noiseLastTs < cfg.NOISE_SAMPLE_EVERY_S * 1000) return;
+    st.noiseLastTs = ts;
+    st.noise.push([ts, st.bpm, Math.log(st.rmssd)]);
+    const from = ts - cfg.NOISE_WINDOW_MIN * 60000;
+    while (st.noise.length && st.noise[0][0] < from) st.noise.shift();
+    const span = st.noise.length ? st.noise[st.noise.length - 1][0] - st.noise[0][0] : 0;
+    if (span >= cfg.NOISE_MIN_MIN * 60000 && st.noise.length >= 20) {
+      st.sigmaBpm = Math.max(cfg.NOISE_MIN_SIGMA_BPM, mad(st.noise.map(r => r[1])));
+      st.sigmaLn = Math.max(cfg.NOISE_MIN_SIGMA_LN, mad(st.noise.map(r => r[2])));
+    } else { st.sigmaBpm = null; st.sigmaLn = null; }
+  }
+
+  function median3(arr) { const s = arr.slice().sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+  // Angle (degrees) between the mean arm direction some time ago and the one now; null when there is not enough accelerometer data.
+  function orientAngle(ts) {
+    const refA = ts - cfg.ORIENT_REF_START_S * 1000, refB = ts - cfg.ORIENT_REF_END_S * 1000, nowA = ts - cfg.ORIENT_NOW_S * 1000;
+    const ref = [], now = [];
+    for (const o of st.orient) { if (o.ts >= refA && o.ts < refB) ref.push(o.v); else if (o.ts >= nowA) now.push(o.v); }
+    if (ref.length < 5 || now.length < 3) return null;
+    const mv = a => [0, 1, 2].map(i => median3(a.map(v => v[i])));
+    const u = mv(ref), v = mv(now);
+    const nu = Math.hypot(u[0], u[1], u[2]), nv = Math.hypot(v[0], v[1], v[2]);
+    if (!(nu > 0) || !(nv > 0)) return null;
+    const c = Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1] + u[2] * v[2]) / (nu * nv)));
+    return Math.round(Math.acos(c) * 1800 / Math.PI) / 10;
+  }
+
+  // v1.5: activity state from the arm accelerometer. Walking moves the right arm continuously, desk work does it in bursts.
+  // A posture change is a movement burst followed, within TRANSITION_PENDING_S, by a change of the arm direction.
+  // Called for every sample, rejected ones included: walking is exactly when the sensor's movement bit rejects beats.
+  function updateActivityState(ts, s) {
+    const mov = s.mov != null ? s.mov : (s.blocker ? 60 : 0);   // without the accelerometer the blocker bit stands in
+    st.locoRing.push({ ts, mov });
+    while (st.locoRing.length > 1 && ts - st.locoRing[0].ts > cfg.LOCO_WINDOW_S * 1000) st.locoRing.shift();
+    let locoHits = 0, gestHits = 0;
+    for (const r of st.locoRing) {
+      if (r.mov >= cfg.LOCO_MOV_MG) locoHits++;
+      if (r.mov >= cfg.GESTURE_MOV_MG) gestHits++;
+    }
+    const n = st.locoRing.length || 1;
+    if (mov >= cfg.TRANSITION_MOV_MG) st.burstTs = ts;          // latched: the direction change shows up later
+    if (locoHits / n >= cfg.LOCO_FRACTION && n >= 8) {
+      st.lastLocoTs = ts;
+      st.actState = 'LOCOMOTION';
+    } else if (st.lastLocoTs !== null && ts - st.lastLocoTs <= cfg.RECOVERY_MAX_S * 1000 &&
+               st.baseBpm > 0 && st.bpm > st.baseBpm + cfg.RECOVERY_BPM_MARGIN) {
+      st.actState = 'RECOVERY';
+    } else {
+      const pending = st.burstTs !== null && ts - st.burstTs <= cfg.TRANSITION_PENDING_S * 1000;
+      if (pending && ts > st.transUntilTs) {
+        const deg = orientAngle(ts);
+        if (deg !== null && deg >= cfg.TRANSITION_DEG) { st.transStartTs = ts; st.transUntilTs = ts + cfg.TRANSITION_HOLD_S * 1000; st.burstTs = null; }
+      } else if (ts < st.transUntilTs && mov >= cfg.TRANSITION_MOV_MG) {
+        // sitting down again: the arm direction goes back to where it was, so the angle cannot confirm it
+        st.transUntilTs = Math.min(ts + cfg.TRANSITION_HOLD_S * 1000, st.transStartTs + cfg.TRANSITION_MAX_S * 1000);
+      }
+      if (ts < st.transUntilTs) st.actState = 'TRANSITION_HOLD';
+      else if (gestHits / n >= cfg.GESTURE_FRACTION) st.actState = 'DESK_OR_GESTURE';
+      else st.actState = 'STILL_REST';
+    }
+    st.stateCounts[st.actState]++;
+    return st.actState;
+  }
+
+  function windowStep(ts, hit, inCooldown, stateBlocks, out) {
+    st.win.push({ ts, hit });
+    while (st.win.length > 1 && ts - st.win[0].ts > cfg.WINDOW_S * 1000) st.win.shift();
+    let h = 0; for (const w of st.win) if (w.hit) h++;
+    const n = st.win.length, span = ts - st.win[0].ts, frac = n ? h / n : 0;
+    st.winFrac = frac; st.winHot = frac >= cfg.WINDOW_HOLD_FRACTION;
+    if (st.needRelease && frac < cfg.WINDOW_HOLD_FRACTION) st.needRelease = false;
+    st.orientDeg = cfg.ORIENT_GATE ? orientAngle(ts) : null;
+    const ready = n >= cfg.WINDOW_MIN_N && span >= cfg.WINDOW_S * 1000 * 0.66 && frac >= cfg.WINDOW_FRACTION;
+    if (stateBlocks) {
+      // Samples taken while walking, recovering or settling after a posture change do not count: the window starts again
+      // when the state ends, otherwise it would still be full of them and fire the moment the state is over.
+      if (hit) st.suppressedByState++;                  // counts the hot samples the state kept out of the window
+      st.win.length = 0; st.winFrac = 0; st.winHot = false;
+      return;
+    }
+    if (!st.monitoring || inCooldown || st.needRelease) return;
+    if (!ready) return;
+    if (cfg.ORIENT_GATE && st.orientDeg !== null && st.orientDeg >= cfg.ORIENT_CHANGE_DEG) {
+      if (!st.orientLogged) { st.orientLogged = true; out.push({ kind: 'log', msg: `Window above thresholds but the arm direction changed by ${st.orientDeg} deg: posture, no trigger.` }); }
+      return;
+    }
+    st.orientLogged = false;
+    fireArousal('window_score', ts, out);
+    for (let i = out.length - 1; i >= 0; i--) if (out[i].kind === 'event') { out[i].event.window_fraction = Math.round(frac * 100) / 100; out[i].event.orientation_change_deg = st.orientDeg; break; }
+  }
+
+  function fireArousal(type, ts, out) {
+    const onsetS = st.elevatedSince === null ? 0 : Math.round((ts - st.elevatedSince) / 100) / 10;
+    const share = movementShare();
+    const moved = cfg.MOVEMENT_CONTEXT === 'tag' && share >= cfg.MOVEMENT_BLOCKED_FRACTION;
+    const ev = makeEvent(type, ts, {
+      onset_to_trigger_s: onsetS, response: null,
+      movement_share: Math.round(share * 100) / 100,
+      z_bpm: st.sigmaBpm ? Math.round(((st.bpm - st.baseBpm) / st.sigmaBpm) * 10) / 10 : null,
+      z_ln_rmssd: (st.sigmaLn && st.baseRmssd > 0 && st.rmssd > 0) ? Math.round(((Math.log(st.baseRmssd) - Math.log(st.rmssd)) / st.sigmaLn) * 10) / 10 : null,
+      threshold_mode: cfg.THRESHOLD_MODE,
+      context: moved ? 'movement' : null,
+      notify: !moved
+    });
+    out.push({ kind: 'event', event: ev });
+    out.push({ kind: 'log', msg: `TRIGGER [${type.toUpperCase()}]${moved ? ' (after movement, no notification)' : ''} | ANS: ${st.ans} | rMSSD: -${ev.drop_percentage}% | onset to trigger: ${onsetS}s` });
+    st.tracking = {
+      id: ev.id, triggerTs: ts, onsetTs: st.elevatedSince === null ? ts : st.elevatedSince,
+      until: ts + cfg.RESPONSE_WINDOW_SECONDS * 1000,
+      baseBpm: st.baseBpm, baseRmssd: st.baseRmssd,
+      peakDelta: st.bpm - st.baseBpm, peakDeltaTs: ts,
+      peakDrop: st.baseRmssd > 0 ? 1 - st.rmssd / st.baseRmssd : 0, peakDropTs: ts,
+      endTs: null
+    };
+    st.cooldownUntil = ts + cfg.COOLDOWN_SECONDS * 1000;
+    st.elevatedSince = null;
+    st.tonicSeconds = 0;
+    st.needRelease = true;
+  }
+
+  function closeTracking(out) {
+    const tr = st.tracking;
+    if (!tr) return;
+    const s = ms => Math.round(ms / 100) / 10;
+    out.push({
+      kind: 'event_update', id: tr.id,
+      response: {
+        peak_bpm_delta: tr.peakDelta,
+        time_to_peak_bpm_s: s(tr.peakDeltaTs - tr.onsetTs),
+        peak_rmssd_drop_percent: Math.round(tr.peakDrop * 100),
+        time_to_peak_drop_s: s(tr.peakDropTs - tr.onsetTs),
+        // how long the rise lasted, from its start to the first sample back under the tonic thresholds
+        elevated_duration_s: tr.endTs === null ? null : s(tr.endTs - tr.onsetTs),
+        window_s: cfg.RESPONSE_WINDOW_SECONDS
+      }
+    });
+    st.tracking = null;
+  }
+
+  function trackResponse(ts, out) {
+    const tr = st.tracking;
+    if (!tr) return;
+    if (ts > tr.until) { closeTracking(out); return; }
+    const delta = st.bpm - tr.baseBpm;
+    const drop = tr.baseRmssd > 0 ? 1 - st.rmssd / tr.baseRmssd : 0;
+    if (delta > tr.peakDelta) { tr.peakDelta = delta; tr.peakDeltaTs = ts; }
+    if (drop > tr.peakDrop) { tr.peakDrop = drop; tr.peakDropTs = ts; }
+    const stillUp = drop >= cfg.TONIC_DROP_PERCENT && delta >= cfg.TONIC_BPM_RISE;
+    if (tr.endTs === null && !stillUp && ts > tr.triggerTs) tr.endTs = ts;
+  }
+
+  function quietStep(ts, valid, moved, inCooldown, out) {
+    if (!cfg.QUIET_ENABLED) return;
+    const usable = valid && st.rmssd !== null;
+
+    // Slow reference: median of the last QUIET_SLOW_WINDOW_MIN minutes, refreshed once a minute.
+    if (usable) st.slow.push([ts, st.bpm, st.rmssd]);
+    const slowFrom = ts - cfg.QUIET_SLOW_WINDOW_MIN * 60000;
+    while (st.slowHead < st.slow.length && st.slow[st.slowHead][0] < slowFrom) st.slowHead++;
+    if (st.slowHead > 4096) { st.slow = st.slow.slice(st.slowHead); st.slowHead = 0; }
+    if (st.slowRefAt === null || ts - st.slowRefAt >= 60000) {
+      st.slowRefAt = ts;
+      const live = st.slow.slice(st.slowHead);
+      const span = live.length ? live[live.length - 1][0] - live[0][0] : 0;
+      if (span >= cfg.QUIET_MIN_HISTORY_MIN * 60000) {
+        st.slowRefBpm = median(live.map(r => r[1]));
+        st.slowRefRmssd = median(live.map(r => r[2]));
+      } else {
+        st.slowRefBpm = null; st.slowRefRmssd = null;
+      }
+    }
+    const refBpm = cfg.REST_BPM != null ? cfg.REST_BPM : st.slowRefBpm;
+    const refRmssd = cfg.REST_RMSSD != null ? cfg.REST_RMSSD : st.slowRefRmssd;
+    const haveRef = refBpm != null && refRmssd != null;
+    const ok = usable && haveRef &&
+      st.bpm <= refBpm + cfg.QUIET_BPM_MARGIN &&
+      st.rmssd >= refRmssd * (1 - cfg.QUIET_RMSSD_TOLERANCE);
+
+    if (valid) {
+      if (st.qLastValidTs !== null && ts - st.qLastValidTs > cfg.QUIET_MAX_GAP_S * 1000) st.qLastGapTs = ts;
+      st.qLastValidTs = ts;
+    }
+
+    // Sliding window of QUIET_DURATION_MIN minutes, with running counters.
+    const D = cfg.QUIET_DURATION_MIN * 60000;
+    st.qwin.push([ts, valid ? 1 : 0, ok ? 1 : 0, moved ? 1 : 0]);
+    st.qAll++; if (valid) st.qValid++; if (ok) st.qOk++; if (moved) st.qMoved++;
+    while (st.qHead < st.qwin.length && st.qwin[st.qHead][0] < ts - D) {
+      const o = st.qwin[st.qHead++];
+      st.qAll--; st.qValid -= o[1]; st.qOk -= o[2]; st.qMoved -= o[3];
+    }
+    if (st.qHead > 4096) { st.qwin = st.qwin.slice(st.qHead); st.qHead = 0; }
+
+    const oldest = st.qwin[st.qHead][0];
+    const covered = oldest <= ts - D + cfg.QUIET_MAX_GAP_S * 1000;
+    const noGap = st.qLastGapTs === null || st.qLastGapTs < ts - D;
+    const okFraction = st.qValid ? st.qOk / st.qValid : 0;
+    const validFraction = st.qAll ? st.qValid / st.qAll : 0;
+    const movedFraction = st.qAll ? st.qMoved / st.qAll : 1;
+
+    if (!st.quietArmed && okFraction < cfg.QUIET_REARM_FRACTION) st.quietArmed = true;
+    const day = dayKey(ts);
+    if (day !== st.quietDay) { st.quietDay = day; st.quietCount = 0; }
+
+    st.quietLast = {
+      ref_bpm: refBpm, ref_rmssd: refRmssd,
+      ref_source: !haveRef ? null : (cfg.REST_BPM != null && cfg.REST_RMSSD != null ? 'rest' : 'slow_baseline'),
+      ok_fraction: okFraction, valid_fraction: validFraction, moved_fraction: movedFraction,
+      covered_min: Math.min(cfg.QUIET_DURATION_MIN, (ts - oldest) / 60000),
+      armed: st.quietArmed, count_today: st.quietCount
+    };
+
+    const holds = covered && noGap && haveRef &&
+      okFraction >= cfg.QUIET_MIN_OK_FRACTION &&
+      validFraction >= cfg.QUIET_MIN_VALID_FRACTION &&
+      movedFraction <= cfg.QUIET_MAX_MOVED_FRACTION;
+
+    if (holds && usable && st.quietArmed && !inCooldown && !inQuietHours(ts) && st.quietCount < cfg.QUIET_MAX_PER_DAY) {
+      st.quietArmed = false;
+      st.quietCount++;
+      st.quietLast.armed = false; st.quietLast.count_today = st.quietCount;
+      const ev = makeEvent('quiet_prolonged', ts, {
+        baseline_bpm: refBpm,
+        baseline_rmssd_median: refRmssd,
+        drop_percentage: null,
+        quiet: {
+          duration_min: cfg.QUIET_DURATION_MIN,
+          ref_source: st.quietLast.ref_source,
+          ok_fraction: Math.round(okFraction * 100) / 100,
+          valid_fraction: Math.round(validFraction * 100) / 100,
+          moved_fraction: Math.round(movedFraction * 100) / 100
+        }
+      });
+      out.push({ kind: 'event', event: ev });
+      out.push({ kind: 'log', msg: `QUIET stretch: ${cfg.QUIET_DURATION_MIN} min at or below reference (${refBpm} BPM, ${refRmssd} ms). Invite ${st.quietCount}/${cfg.QUIET_MAX_PER_DAY} today.` });
+    }
+  }
+
+  function ingest(s) {
+    const out = [];
+    const ts = s.ts;
+    st.total++;
+    st.lastTs = ts;
+
+    if (st.cooldownUntil && ts >= st.cooldownUntil) {
+      st.cooldownUntil = 0;
+      out.push({ kind: 'log', msg: 'Cooldown ended. Baseline unfrozen.' });
+    }
+    const inCooldown = st.cooldownUntil > 0;
+
+    st.moveRing.push({ ts, b: !!s.blocker, m: (s.mov == null ? null : s.mov) });
+    if (s.ax != null && s.ay != null && s.az != null) {
+      st.orient.push({ ts, v: [s.ax, s.ay, s.az] });
+      while (st.orient.length && ts - st.orient[0].ts > (cfg.ORIENT_REF_START_S + 5) * 1000) st.orient.shift();
+    }
+    while (st.moveRing.length > 1 && ts - st.moveRing[0].ts > cfg.MOVEMENT_WINDOW_S * 1000) st.moveRing.shift();
+    const curState = updateActivityState(ts, s);
+    const stateBlocks = cfg.STATE_MACHINE_MODE && (curState === 'LOCOMOTION' || curState === 'RECOVERY' || curState === 'TRANSITION_HOLD');
+
+    const reason = rejectReason(s);
+    if (reason) {
+      st.rejected[reason]++;
+      st.prevAccepted = false;
+      quietStep(ts, false, reason === 'blocker', inCooldown, out);
+      return out;
+    }
+    st.accepted++;
+
+    // A long hole without valid samples breaks continuity and any persistence in progress.
+    const gap = st.lastValidTs !== null && ts - st.lastValidTs > cfg.MAX_SAMPLE_GAP_S * 1000;
+    if (gap && st.elevatedSince !== null) {
+      st.elevatedSince = null; st.tonicSeconds = 0;
+      out.push({ kind: 'log', msg: `No valid samples for more than ${cfg.MAX_SAMPLE_GAP_S}s. Persistence reset.` });
+    }
+
+    st.ppiBuf.push({ ppi: s.ppi, adj: st.prevAccepted && !gap, ts });
+    if (st.ppiBuf.length > cfg.RMSSD_BUFFER_SIZE) st.ppiBuf.shift();
+    if (cfg.RMSSD_MAX_SPAN_S != null) {
+      while (st.ppiBuf.length > 1 && ts - st.ppiBuf[0].ts > cfg.RMSSD_MAX_SPAN_S * 1000) st.ppiBuf.shift();
+    }
+    st.prevAccepted = true;
+    st.lastValidTs = ts;
+    st.bpm = s.hr;
+    if (cfg.BPM_FROM_PPI) {
+      const last = st.ppiBuf.slice(-cfg.BPM_PPI_BEATS);
+      st.bpm = Math.round(60000 / (last.reduce((a, b) => a + b.ppi, 0) / last.length));
+    }
+    st.rmssd = computeRmssd(st.ppiBuf, cfg);
+
+    if (st.rmssd === null) {
+      quietStep(ts, true, false, inCooldown, out);
+      return out;
+    }
+
+    // Baseline: frozen during cooldown (and, if asked, while a rise is in progress).
+    const hold = inCooldown || stateBlocks || (cfg.FREEZE_BASELINE_WHILE_ELEVATED && st.elevatedSince !== null) || (cfg.DETECTOR === 'window' && st.winHot);
+    if (!hold) {
+      st.baseRmssdHist.push(st.rmssd);
+      st.baseBpmHist.push(st.bpm);
+      if (st.baseRmssdHist.length > cfg.MAX_BASELINE_HISTORY) { st.baseRmssdHist.shift(); st.baseBpmHist.shift(); }
+      st.baseRmssd = median(st.baseRmssdHist);
+      st.baseBpm = cfg.BASELINE_BPM_STAT === 'median' ? median(st.baseBpmHist) : average(st.baseBpmHist);
+      if ((cfg.THRESHOLD_MODE === 'noise' || cfg.DETECTOR === 'window') && st.rmssd > 0) updateNoise(ts);
+      if (!st.monitoring && st.baseRmssdHist.length >= cfg.MIN_BASELINE_SAMPLES) {
+        st.monitoring = true;
+        out.push({ kind: 'log', msg: 'Surveillance armed: phasic, tonic' + (cfg.QUIET_ENABLED ? ', quiet.' : '.') });
+      }
+    }
+
+    st.ans = classifyAns(st.rmssd, st.bpm, st.baseRmssd, st.baseBpm);
+    trackResponse(ts, out);
+
+    let strict, raised, winHit = false;
+    if (cfg.DETECTOR === 'window') {
+      strict = false; raised = false;
+      if (st.sigmaBpm !== null && st.baseRmssd > 0 && st.rmssd > 0) {
+        const dB = st.bpm - st.baseBpm, dL = Math.log(st.baseRmssd) - Math.log(st.rmssd);
+        winHit = dB >= Math.max(cfg.WINDOW_MIN_BPM_RISE, cfg.WINDOW_Z_BPM * st.sigmaBpm) && dL >= Math.max(cfg.WINDOW_MIN_LN_DROP, cfg.WINDOW_Z_RMSSD * st.sigmaLn);
+      }
+    } else if (cfg.THRESHOLD_MODE === 'noise') {
+      if (st.sigmaBpm === null || !(st.baseRmssd > 0) || !(st.rmssd > 0)) { strict = false; raised = false; }
+      else {
+        const dB = st.bpm - st.baseBpm;                              // BPM above baseline
+        const dL = Math.log(st.baseRmssd) - Math.log(st.rmssd);      // ln rMSSD below baseline
+        const need = (zB, zL) => dB >= Math.max(cfg.NOISE_MIN_BPM_RISE, zB * st.sigmaBpm) && dL >= Math.max(cfg.NOISE_MIN_LN_DROP, zL * st.sigmaLn);
+        strict = need(cfg.PHASIC_Z_BPM, cfg.PHASIC_Z_RMSSD);
+        raised = need(cfg.TONIC_Z_BPM, cfg.TONIC_Z_RMSSD);
+      }
+    } else {
+      const phasicRmssdLimit = Math.round(st.baseRmssd * (1 - cfg.PHASIC_DROP_PERCENT));
+      const phasicBpmLimit = st.baseBpm + cfg.PHASIC_BPM_RISE;
+      const tonicRmssdLimit = Math.round(st.baseRmssd * (1 - cfg.TONIC_DROP_PERCENT));
+      const tonicBpmLimit = st.baseBpm + cfg.TONIC_BPM_RISE;
+      strict = st.rmssd <= phasicRmssdLimit && st.bpm >= phasicBpmLimit;
+      raised = st.rmssd <= tonicRmssdLimit && st.bpm >= tonicBpmLimit;
+    }
+
+    // After a trigger the rise must end once before a new trigger is possible. If the body
+    // simply stays at the new level, the baseline catches up after the cooldown and releases it.
+    if (st.needRelease && st.monitoring && !(strict || raised) && cfg.DETECTOR !== 'window') st.needRelease = false;
+    const armed = !(cfg.REARM_AFTER_RELEASE && st.needRelease);
+
+    if (st.monitoring && !inCooldown && armed && stateBlocks) {
+      if (strict || raised) st.suppressedByState++;
+      st.elevatedSince = null;                // persistence restarts when the state ends
+      st.tonicSeconds = 0;
+    } else if (st.monitoring && !inCooldown && armed) {
+      if (strict || raised) {
+        if (st.elevatedSince === null) {
+          st.elevatedSince = ts;
+          if (!strict) out.push({ kind: 'log', msg: `Rise started (+${cfg.TONIC_BPM_RISE} BPM, -${Math.round(cfg.TONIC_DROP_PERCENT * 100)}% rMSSD). Counting persistence on samples...` });
+        }
+      } else if (st.elevatedSince !== null) {
+        st.elevatedSince = null;
+        out.push({ kind: 'log', msg: `Rise ended before ${cfg.TONIC_PERSISTENCE_SECONDS}s. Persistence reset.` });
+      }
+      const sinceOnset = st.elevatedSince === null ? 0 : (ts - st.elevatedSince) / 1000;
+      st.tonicSeconds = sinceOnset;
+
+      const phasicInTime = cfg.PHASIC_MAX_ONSET_S == null || sinceOnset <= cfg.PHASIC_MAX_ONSET_S;
+      if (strict && phasicInTime && sinceOnset >= cfg.PHASIC_MIN_S) fireArousal('phasic_acute', ts, out);
+      else if ((strict || raised) && sinceOnset >= cfg.TONIC_PERSISTENCE_SECONDS) fireArousal('tonic_sustained', ts, out);
+    } else {
+      st.elevatedSince = null;
+      st.tonicSeconds = 0;
+    }
+
+    if (cfg.DETECTOR === 'window') windowStep(ts, winHit, inCooldown, stateBlocks, out);
+
+    quietStep(ts, true, false, st.cooldownUntil > 0, out);
+    return out;
+  }
+
+  // Call at the end of a recording to close what is still open.
+  function flush() {
+    const out = [];
+    closeTracking(out);
+    return out;
+  }
+
+  function getState() {
+    return {
+      total: st.total, accepted: st.accepted, rejected: Object.assign({}, st.rejected),
+      bpm: st.bpm, rmssd: st.rmssd,
+      baseBpm: st.baseBpm, baseRmssd: st.baseRmssd,
+      baselineCount: st.baseRmssdHist.length,
+      monitoring: st.monitoring,
+      cooldownUntil: st.cooldownUntil,
+      ans: st.ans,
+      tonicSeconds: st.tonicSeconds,
+      waitingRelease: !!(cfg.REARM_AFTER_RELEASE && st.needRelease),
+      actState: st.actState, stateCounts: Object.assign({}, st.stateCounts), suppressedByState: st.suppressedByState,
+      lastTs: st.lastTs, lastValidTs: st.lastValidTs,
+      quiet: st.quietLast,
+      sigmaBpm: st.sigmaBpm, sigmaLn: st.sigmaLn, winFrac: st.winFrac, orientDeg: st.orientDeg
+    };
+  }
+
+  return { ingest, flush, getState, config: cfg };
+}
+
+// Runs a whole recording through a fresh engine. samples: [{ ts, ppi, hr, err, blocker }]
+function replayRecording(samples, userConfig) {
+  const engine = createEngine(userConfig);
+  const events = [];
+  const byId = {};
+  const handle = outs => {
+    for (const o of outs) {
+      if (o.kind === 'event') { events.push(o.event); byId[o.event.id] = o.event; }
+      else if (o.kind === 'event_update' && byId[o.id]) byId[o.id].response = o.response;
+    }
+  };
+  for (const s of samples) handle(engine.ingest(s));
+  handle(engine.flush());
+  return { events, state: engine.getState(), config: engine.config };
+}
+
+// ----------------------------------------------------------------------------
+// Synthetic recordings, for trying the engine without the sensor.
+// segments: [{ seconds, bpm, rmssd, ramp?, blocker?, err?, mov?, blockerShare? }]
+//   ramp: seconds over which BPM and rMSSD move from the previous segment's values
+//   blocker: true = every sample carries the movement bit; err: error estimate in ms
+// ----------------------------------------------------------------------------
+function synthRecording(segments, opts) {
+  opts = opts || {};
+  let seed = opts.seed == null ? 12345 : opts.seed;
+  const rnd = () => { // mulberry32
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const gauss = () => Math.sqrt(-2 * Math.log(1 - rnd())) * Math.cos(2 * Math.PI * rnd());
+  let ts = opts.start == null ? new Date(2026, 10, 12, 12, 0, 0).getTime() : opts.start;
+  const samples = [];
+  let prev = null;
+  for (const seg of segments) {
+    const t0 = ts, end = ts + seg.seconds * 1000;
+    while (ts < end) {
+      let bpm = seg.bpm, rm = seg.rmssd;
+      if (seg.ramp && prev) {
+        const k = Math.min(1, (ts - t0) / (seg.ramp * 1000));
+        bpm = prev.bpm + (seg.bpm - prev.bpm) * k;
+        rm = prev.rmssd + (seg.rmssd - prev.rmssd) * k;
+      }
+      // independent noise with sd = rMSSD / sqrt(2) gives the wanted rMSSD
+      let ppi = Math.round(60000 / bpm + gauss() * rm / Math.SQRT2);
+      ppi = Math.max(320, Math.min(1900, ppi));
+      ts += ppi;
+      const smp = { ts, ppi, hr: Math.round(bpm), err: seg.err == null ? 5 : seg.err, blocker: !!seg.blocker };
+      if (seg.mov != null) smp.mov = seg.mov;                       // optional: accelerometer movement, mG
+      if (seg.blockerShare && rnd() < seg.blockerShare) smp.blocker = true;   // optional: share of samples with the movement bit
+      samples.push(smp);
+    }
+    prev = seg;
+  }
+  return samples;
+}
+
+const SYNTH_SCENARIOS = {
+  sudden: {
+    label: 'Sudden stimulus (expected: phasic)',
+    segments: [
+      { seconds: 180, bpm: 62, rmssd: 60 },
+      { seconds: 60, bpm: 85, rmssd: 20 },
+      { seconds: 240, bpm: 62, rmssd: 60, ramp: 30 }
+    ]
+  },
+  sustained: {
+    label: 'Sustained, moderate (expected: tonic)',
+    segments: [
+      { seconds: 180, bpm: 62, rmssd: 60 },
+      { seconds: 150, bpm: 69, rmssd: 30, ramp: 20 },
+      { seconds: 240, bpm: 62, rmssd: 60, ramp: 30 }
+    ]
+  },
+  desk_vs_walk: {
+    label: 'v1.5: walking and recovery (held back by the states) then stress at the desk (found)',
+    segments: [
+      { seconds: 420, bpm: 62, rmssd: 60, mov: 8 },
+      { seconds: 120, bpm: 100, rmssd: 14, mov: 95, blockerShare: 0.6 },   // walking: LOCOMOTION, no trigger, baseline held
+      { seconds: 60, bpm: 80, rmssd: 28, mov: 8, ramp: 40 },              // sitting after the walk: RECOVERY, no trigger
+      { seconds: 200, bpm: 62, rmssd: 60, mov: 8, ramp: 30 },
+      { seconds: 100, bpm: 86, rmssd: 14, mov: 10 },                      // a rise while seated, arm still: a trigger
+      { seconds: 200, bpm: 62, rmssd: 60, mov: 8, ramp: 30 }
+    ]
+  },
+  sustained_strong: {
+    label: 'Sustained and strong, slow build (phasic or tonic? depends on PHASIC_MAX_ONSET_S)',
+    segments: [
+      { seconds: 180, bpm: 60, rmssd: 60 },
+      { seconds: 180, bpm: 76, rmssd: 30, ramp: 60 },
+      { seconds: 240, bpm: 60, rmssd: 60, ramp: 30 }
+    ]
+  },
+  movement: {
+    label: 'Rise, then movement hides the signal (expected: nothing)',
+    segments: [
+      { seconds: 180, bpm: 62, rmssd: 60 },
+      { seconds: 12, bpm: 69, rmssd: 30 },
+      { seconds: 60, bpm: 69, rmssd: 30, blocker: true },
+      { seconds: 240, bpm: 62, rmssd: 60 }
+    ]
+  },
+  quiet: {
+    label: 'Active 25 min, then 40 min of quiet (expected: quiet invite)',
+    segments: [
+      { seconds: 1500, bpm: 74, rmssd: 40 },
+      { seconds: 2400, bpm: 60, rmssd: 55, ramp: 120 }
+    ]
+  }
+};
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { ENGINE_VERSION, DEFAULT_CONFIG, V1_1_COMPAT_CONFIG, V1_3_1_CONFIG, SHADOW_CONFIGS, createEngine, replayRecording, synthRecording, SYNTH_SCENARIOS, median, average, computeRmssd, classifyAns };
+}
+  </script>
+  <script>
+// ============================================================================
+// PAGE (v1.3): Bluetooth with reconnection, recording, guided calibration, check-ins, GitHub upload.
+// The engine above knows nothing about this.
+// ============================================================================
+const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_CONTROL_POINT = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_DATA = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+const EVENTS_KEY = 'polar_body_diary_events_v13';
+const RECORDING_FORMAT = 'body-activated-diary/ppi-recording';
+const COLUMNS = ['ts', 'ppi', 'hr', 'err', 'flags', 'fts', 'late', 'mov', 'ax', 'ay', 'az'];
+
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+
+let liveOverrides = {};
+let engine = createEngine(liveOverrides);
+// Shadow engines (v1.4): same beats, events kept as session markers, no sound and not in the events list.
+let shadows = SHADOW_CONFIGS.map(d => ({ id: d.id, engine: createEngine(d.cfg) }));
+let lastState = null;   // last activity state written as a marker
+function resetEngines() {
+  lastState = null;
+  engine = createEngine(liveOverrides);
+  shadows = SHADOW_CONFIGS.map(d => ({ id: d.id, engine: createEngine(d.cfg) }));
+}
+function feedShadows(s) {
+  for (const sh of shadows) {
+    for (const o of sh.engine.ingest(s)) {
+      if (o.kind !== 'event' || o.event.trigger_type === 'quiet_prolonged') continue;
+      const e = o.event;
+      const mk = addMarker('shadow:' + sh.id + ':' + e.trigger_type, 'shadow', { bpm: e.trigger_bpm != null ? e.trigger_bpm : null, activity_state: e.activity_state || null, z_bpm: e.z_bpm, z_ln_rmssd: e.z_ln_rmssd, window_fraction: e.window_fraction != null ? e.window_fraction : undefined, orientation_change_deg: e.orientation_change_deg != null ? e.orientation_change_deg : undefined, context: e.context || null });
+      if (mk && e.timestamp && !isNaN(Date.parse(e.timestamp))) mk.ts = Date.parse(e.timestamp);
+      log('Ombra "' + sh.id + '": ' + e.trigger_type + (e.activity_state ? ' [' + e.activity_state + ']' : '') + (e.context ? ' (' + e.context + ')' : '') + ' — solo registrato.');
+    }
+  }
+}
+let connected = false;
+let reconnecting = false;
+let wantConnected = false, btDevice = null, reconnectTimer = null, reconnectTries = 0;
+let lastStampTs = null;
+
+function log(msg) {
+  const line = el('div', `[${new Date().toLocaleTimeString()}] ${msg}`, 'log-line');
+  const box = $('terminalLogs');
+  box.appendChild(line);
+  while (box.childNodes.length > 400) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+function playTriggerChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.15);
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.6);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.6);
+  } catch (e) { console.warn('Audio feedback error:', e); }
+}
+
+function fileStamp(ms) { // local time, safe for file names
+  const d = new Date(ms), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}`;
+}
+
+function download(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ---------------------------------------------------------------- events
+function loadEvents() {
+  try { return JSON.parse(localStorage.getItem(EVENTS_KEY) || '[]'); }
+  catch (e) { console.error('Storage load failed:', e); return []; }
+}
+function storeEvents(events) {
+  try { localStorage.setItem(EVENTS_KEY, JSON.stringify(events)); }
+  catch (e) { log('Could not save the events in this browser: ' + e.message); }
+}
+
+const TYPE_LABEL = { phasic_acute: ['PHASIC', 'type-phasic'], tonic_sustained: ['TONIC', 'type-tonic'], window_score: ['WINDOW', 'type-tonic'], quiet_prolonged: ['QUIET', 'type-quiet'] };
+
+function eventRow(evt) {
+  const tr = document.createElement('tr');
+  const cell = (text, color) => { const td = el('td', text); if (color) td.style.color = color; tr.appendChild(td); return td; };
+  const d = new Date(evt.timestamp);
+  cell(d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+  const lab = TYPE_LABEL[evt.trigger_type] || [String(evt.trigger_type || '?'), 'type-tonic'];
+  const tdType = document.createElement('td'); tdType.appendChild(el('span', lab[0], 'type-tag ' + lab[1]));
+  if (evt.activity_state && evt.activity_state !== 'STILL_REST') tdType.appendChild(el('span', ' ' + evt.activity_state, 'small'));
+  if (evt.context === 'movement') tdType.appendChild(el('span', ' dopo movimento', 'small'));
+  tr.appendChild(tdType);
+  cell(evt.trigger_bpm + ' BPM', '#f8fafc');
+  cell(evt.baseline_bpm == null ? '-' : evt.baseline_bpm + ' BPM', '#94a3b8');
+  cell(evt.trigger_rmssd + ' ms', '#f8fafc');
+  cell(evt.baseline_rmssd_median == null ? '-' : evt.baseline_rmssd_median + ' ms', '#94a3b8');
+  // after the person answered the check-in linked to the trigger, show the answer in place of the ANS label
+  const valStr = evt.user_valence != null
+    ? `V:${evt.user_valence > 0 ? '+' + evt.user_valence : evt.user_valence} A:${evt.user_arousal || '?'}${evt.user_activity ? ' (' + evt.user_activity + ')' : ''}${evt.user_reflection ? ' "' + evt.user_reflection + '"' : ''}`
+    : (evt.ans_state || '-');
+  cell(valStr, evt.user_valence != null ? '#38bdf8' : '#cbd5e1');
+  cell(evt.drop_percentage == null ? '-' : '-' + evt.drop_percentage + '%', '#fca5a5');
+  cell(evt.onset_to_trigger_s == null ? '-' : evt.onset_to_trigger_s + ' s');
+  let after = '-';
+  if (evt.trigger_type === 'quiet_prolonged' && evt.quiet) {
+    after = `${evt.quiet.duration_min} min, ${Math.round(evt.quiet.ok_fraction * 100)}% in condition`;
+  } else if (evt.response) {
+    const r = evt.response;
+    after = `+${r.peak_bpm_delta} BPM at ${r.time_to_peak_bpm_s}s, -${r.peak_rmssd_drop_percent}% at ${r.time_to_peak_drop_s}s` +
+      (r.elevated_duration_s == null ? ', still up at the end of the window' : `, up for ${r.elevated_duration_s}s`);
+  } else if (evt.trigger_type !== 'quiet_prolonged') after = 'measuring...';
+  cell(after, '#94a3b8');
+  return tr;
+}
+
+function renderRows(tbody, events, emptyText) {
+  tbody.textContent = '';
+  if (!events.length) {
+    const tr = document.createElement('tr'); const td = el('td', emptyText, 'empty'); td.colSpan = 10; tr.appendChild(td); tbody.appendChild(tr);
+    return;
+  }
+  for (const e of events) tbody.appendChild(eventRow(e));
+}
+
+function renderEvents() {
+  const events = loadEvents();
+  $('eventCountBadge').textContent = `${events.length} event${events.length === 1 ? '' : 's'}`;
+  renderRows($('eventsBody'), events, 'No triggers recorded yet.');
+}
+
+function handleOutputs(outs) {
+  for (const o of outs) {
+    if (o.kind === 'log') log(o.msg);
+    else if (o.kind === 'event') {
+      const events = loadEvents(); events.unshift(o.event); storeEvents(events); renderEvents();
+      if (o.event.trigger_type !== 'quiet_prolonged' && o.event.notify !== false && !proto.active && !ci.open) {   // no sound for the quiet invite, for a trigger after movement, nor during the guided path or a check-in
+        playTriggerChime();
+        openCheckin(false, o.event);       // the answer is stored on the event: this is how a trigger gets labelled in the field
+      }
+    } else if (o.kind === 'event_update') {
+      const events = loadEvents();
+      const e = events.find(x => x.id === o.id);
+      if (e) { e.response = o.response; storeEvents(events); renderEvents(); }
+    }
+  }
+}
+
+// ---------------------------------------------------------------- recording (raw samples)
+const rec = { id: null, startedAt: null, device: null, rows: [], markers: [], flushed: 0, db: null, dirty: false };
+// Optional raw PPG recording (heavy: about 1 KB per second). Frames are kept apart from the PPI rows and stored in the same IndexedDB
+// 'chunks' store under the session id + ':ppg'. Frame = [sensor_ts_ms, arrival_ms, ...values]: values are groups of 4 (c0, c1, c2, ambient);
+// the first group is raw, every following group is the difference from the previous one.
+const ppgRec = { on: false, frames: [], flushed: 0 };
+const PPG_KEY = 'bad_ppg_v13';
+const PPG_FORMAT_NOTE = 'frame = [sensor_ts_ms, arrival_ms, ...values]. sensor_ts_ms = timestamp in the PPG frame header (the sensor clock, ms since 1970; it is a real clock, unlike the PPI header), null if the browser cannot read it; arrival_ms = when the Bluetooth packet arrived. values come in groups of 4 samples (c0, c1, c2, ambient) at 55 Hz: the first group is raw, every following group is the difference from the previous group. The frame timestamp is the time of the LAST sample in the frame.';
+
+function openDb() {
+  return new Promise(resolve => {
+    try {
+      const req = indexedDB.open('bad_engine_v13', 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        db.createObjectStore('sessions', { keyPath: 'id' });
+        db.createObjectStore('chunks', { keyPath: ['sid', 'seq'] });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch (e) { resolve(null); }
+  });
+}
+const idb = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); });
+const sessionRange = id => IDBKeyRange.bound([id, 0], [id, Number.MAX_SAFE_INTEGER]);
+
+function sessionMeta() {
+  return { id: rec.id, startedAt: rec.startedAt, device: rec.device, count: rec.rows.length, markers: rec.markers, lastTs: rec.rows.length ? rec.rows[rec.rows.length - 1][0] : rec.startedAt };
+}
+
+function flushRecording() {
+  if (!rec.db || rec.id === null) return;
+  const chunk = rec.rows.slice(rec.flushed);
+  const pchunk = ppgRec.frames.slice(ppgRec.flushed);
+  if (!chunk.length && !pchunk.length && !rec.dirty) return;
+  try {
+    const tx = rec.db.transaction(['chunks', 'sessions'], 'readwrite');
+    if (chunk.length) tx.objectStore('chunks').put({ sid: rec.id, seq: rec.flushed, rows: chunk });
+    if (pchunk.length) { tx.objectStore('chunks').put({ sid: rec.id + ':ppg', seq: ppgRec.flushed, rows: pchunk }); ppgRec.flushed = ppgRec.frames.length; }
+    tx.objectStore('sessions').put(sessionMeta());
+    rec.flushed = rec.rows.length; rec.dirty = false;
+    tx.oncomplete = () => renderSessions();
+    tx.onerror = () => log('Saving the recording failed: ' + (tx.error && tx.error.message));
+  } catch (e) { log('Saving the recording failed: ' + e.message); }
+}
+
+function startSession(deviceName) {
+  rec.id = 'rec_' + Date.now(); rec.startedAt = Date.now(); rec.device = deviceName || null;
+  rec.rows = []; rec.markers = []; rec.flushed = 0; rec.dirty = true; ppgRec.frames = []; ppgRec.flushed = 0;
+  if (pendingAccMarker) { addMarker('sensor:acc_start', 'system', pendingAccMarker); pendingAccMarker = null; }
+  flushRecording();
+  log(`Recording started (${rec.id}). Raw samples are kept${rec.db ? ' in this browser every 15 s' : ' in memory only: export before closing the page'}.`);
+}
+
+function buildPayload(meta, rows) {
+  const from = meta.startedAt, to = (meta.lastTs || meta.startedAt) + 1000;
+  const events = loadEvents().filter(e => { const t = new Date(e.timestamp).getTime(); return t >= from - 1000 && t <= to; });
+  return {
+    format: RECORDING_FORMAT, format_version: 3, engine_version: ENGINE_VERSION,
+    session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device,
+    config: engine.config, columns: COLUMNS,
+    note: 'flags is the raw Polar byte: bit0 = blocker (movement), bit1 = skin contact, bit2 = skin contact supported. ts in ms, estimated back from the arrival time of each Bluetooth packet. Format 2 adds kind and data to markers (kind: manual, phase, stimulus, checkin, system). Format 3 adds: fts = the sensor clock in the PPI packet header, which the Verity Sense leaves at 0 (not usable, kept only so the columns stay the same); late = 1 for beats delivered in a burst after more than 15 s without packets (their ts is not reliable, the engine did not use them); mov = standard deviation of the acceleration magnitude over the last 2 s before the packet arrived, in milli-g (null = accelerometer off); ax, ay, az = mean acceleration in milli-g over the same window (arm orientation).',
+    samples: rows, markers: meta.markers || [], events
+  };
+}
+
+async function loadSessionRows(id) {
+  const chunks = await idb(rec.db.transaction('chunks').objectStore('chunks').getAll(sessionRange(id)));
+  chunks.sort((a, b) => a.seq - b.seq);
+  return [].concat(...chunks.map(c => c.rows));
+}
+
+async function renderSessions() {
+  const body = $('sessionsBody');
+  if (!rec.db) { $('storageNote').textContent = 'Browser storage not available: recordings live in memory until you export them.'; return; }
+  let sessions = [];
+  try { sessions = await idb(rec.db.transaction('sessions').objectStore('sessions').getAll()); } catch (e) { return; }
+  sessions.sort((a, b) => b.startedAt - a.startedAt);
+  body.textContent = '';
+  if (!sessions.length) { const tr = document.createElement('tr'); const td = el('td', 'None yet.', 'empty'); td.colSpan = 5; tr.appendChild(td); body.appendChild(tr); return; }
+  for (const s of sessions) {
+    const tr = document.createElement('tr');
+    tr.appendChild(el('td', new Date(s.startedAt).toLocaleString() + (s.id === rec.id ? '  (recording now)' : '')));
+    tr.appendChild(el('td', s.device || '-'));
+    tr.appendChild(el('td', String(s.count)));
+    tr.appendChild(el('td', String((s.markers || []).length)));
+    const td = document.createElement('td');
+    const exp = el('button', 'Export', 'btn-secondary btn-small');
+    exp.onclick = async () => {
+      if (s.id === rec.id) flushRecording();
+      const rows = s.id === rec.id ? rec.rows : await loadSessionRows(s.id);
+      const payload = buildPayload(s.id === rec.id ? sessionMeta() : s, rows);
+      const pf = s.id === rec.id ? ppgRec.frames : await loadSessionRows(s.id + ':ppg');
+      if (pf.length) payload.ppg = { rate_hz: 55, channels: ['c0', 'c1', 'c2', 'ambient'], note: PPG_FORMAT_NOTE, frames: pf };
+      download(`ppi_recording_${fileStamp(s.startedAt)}.json`, payload);
+    };
+    td.appendChild(exp);
+    const up = el('button', 'Carica', 'btn-secondary btn-small'); up.style.marginLeft = '0.4rem';
+    up.onclick = () => syncStored(s);
+    td.appendChild(up);
+    if (s.id !== rec.id) {
+      const del = el('button', 'Delete', 'btn-danger btn-small'); del.style.marginLeft = '0.4rem';
+      del.onclick = () => {
+        if (!confirm('Delete this recording from the browser? Export it first if you need it.')) return;
+        const tx = rec.db.transaction(['chunks', 'sessions'], 'readwrite');
+        tx.objectStore('chunks').delete(sessionRange(s.id)); tx.objectStore('chunks').delete(sessionRange(s.id + ':ppg')); tx.objectStore('sessions').delete(s.id);
+        tx.oncomplete = () => renderSessions();
+      };
+      td.appendChild(del);
+    }
+    tr.appendChild(td); body.appendChild(tr);
+  }
+}
+
+// ---------------------------------------------------------------- Polar PPI frames
+// PPI frame: 10 header bytes, then 6 bytes per beat:
+// hr (1), pulse-to-pulse ms (2, little endian), error estimate ms (2), flags (1).
+function parsePpiFrame(dv) {
+  if (dv.byteLength < 10 || dv.getUint8(0) !== 0x03) return [];
+  const rows = [];
+  let fts = null;
+  try { fts = Number(dv.getBigUint64(1, true) / 1000000n); } catch (e) { /* no BigInt: leave null */ }
+  for (let off = 10; off + 6 <= dv.byteLength; off += 6) {
+    rows.push({ hr: dv.getUint8(off), ppi: dv.getUint16(off + 1, true), err: dv.getUint16(off + 3, true), flags: dv.getUint8(off + 5), fts });
+  }
+  return rows;
+}
+
+// The packet has no per-beat clock: the last beat gets the arrival time, the others are walked back.
+function stampBatch(rows, rx) {
+  let t = rx;
+  for (let i = rows.length - 1; i >= 0; i--) { rows[i].ts = t; const p = rows[i].ppi; t -= (p >= 300 && p <= 2000) ? p : 800; }
+  for (const r of rows) { if (lastStampTs !== null && r.ts <= lastStampTs) r.ts = lastStampTs + 1; lastStampTs = r.ts; }
+}
+
+let lastFrameRx = null, lateRun = 0, backlog = false, lastRowRx = 0;
+
+function onPpiNotification(dv) {
+  const rows = parsePpiFrame(dv);
+  if (!rows.length) return;
+  const rx = Date.now();
+  // A backlog starts with the first packet after more than 15 s of silence and lasts while packets keep arriving less than
+  // 0.4 s apart: the arrival time says nothing about when those beats happened. Two packets close together on their own are normal.
+  const gap = lastFrameRx === null ? 0 : rx - lastFrameRx;
+  if (gap > 15000) backlog = true; else if (backlog && gap >= 400) backlog = false;
+  const late = backlog;
+  lastFrameRx = rx; lastRowRx = rx;
+  stampBatch(rows, rx);
+  const a = accNow(rx);
+  for (const r of rows) {
+    r.late = late;
+    if (a) { r.mov = a.mov; r.ax = a.ax; r.ay = a.ay; r.az = a.az; }
+  }
+  ingestRows(rows);
+}
+
+function ingestRows(rows) {
+  for (const r of rows) {
+    rec.rows.push([r.ts, r.ppi, r.hr, r.err, r.flags, r.fts == null ? null : r.fts, r.late ? 1 : 0, r.mov == null ? null : r.mov, r.ax == null ? null : r.ax, r.ay == null ? null : r.ay, r.az == null ? null : r.az]);
+    if (r.late) {
+      if (lateRun === 0) log('Battiti arrivati in blocco dopo una pausa del collegamento: registrati ma non usati dal motore.');
+      lateRun++;
+      continue;
+    }
+    lateRun = 0;
+    const es = { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err, blocker: (r.flags & 1) === 1, mov: r.mov == null ? null : r.mov, ax: r.ax == null ? null : r.ax, ay: r.ay == null ? null : r.ay, az: r.az == null ? null : r.az };
+    handleOutputs(engine.ingest(es));
+    feedShadows(es);
+    // the live engine classifies the activity state on every sample even though it does not use it: the changes are written as
+    // markers, so a session can be compared with what the person was doing (path "Verifica stati")
+    const cs = engine.getState().actState;
+    if (cs && cs !== lastState) { lastState = cs; if (rec.id !== null) addMarker('state:' + cs, 'state', { state: cs }); }
+  }
+  refresh();
+}
+
+let pmdControl = null, btServer = null;
+const diag = { waiting: null, running: false };
+
+async function openGatt(device) {
+  const server = await device.gatt.connect();
+  const pmd = await server.getPrimaryService(PMD_SERVICE);
+  const control = await pmd.getCharacteristic(PMD_CONTROL_POINT);
+  const data = await pmd.getCharacteristic(PMD_DATA);
+  await data.startNotifications();
+  data.addEventListener('characteristicvaluechanged', e => onPpiNotification(e.target.value));
+  data.addEventListener('characteristicvaluechanged', e => onAccFrame(e.target.value));
+  data.addEventListener('characteristicvaluechanged', e => onPpgFrame(e.target.value));
+  await control.startNotifications();
+  // answers of the control point are read only while a capability check is waiting for one
+  control.addEventListener('characteristicvaluechanged', e => {
+    if (!diag.waiting) return;
+    const v = e.target.value;
+    const u8 = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+    const ex = diag.expect;   // only the answer to the command that is waiting (not the one to the PPI start)
+    if (ex && !(u8[0] === 0xF0 && u8[1] === ex[0] && (ex[0] === 6 || u8[2] === ex[1]))) return;
+    const w = diag.waiting; diag.waiting = null;
+    w(u8);
+  });
+  pmdControl = control; btServer = server;
+  accLive.on = false; accLive.ring = []; ppgRec.on = false; lastFrameRx = null; backlog = false;
+  await control.writeValueWithResponse(new Uint8Array([0x02, 0x03])); // start PPI stream
+  if (store.get(ACC_KEY, true)) {
+    try {
+      await new Promise(r => setTimeout(r, 800)); await setAcc(true);
+      if (!accLive.on) { await new Promise(r => setTimeout(r, 2500)); await setAcc(true); }   // right after a reconnection the first try can be refused
+    } catch (err) { log('Accelerometro non avviato: ' + err.message); }
+  }
+  if (store.get(PPG_KEY, false)) {
+    try {
+      await new Promise(r => setTimeout(r, 800)); await setPpgRec(true);
+      if (!ppgRec.on) { await new Promise(r => setTimeout(r, 2500)); await setPpgRec(true); }
+    } catch (err) { log('PPG grezzo non avviato: ' + err.message); }
+  }
+}
+
+// ---------------------------------------------------------------- accelerometer test (30 s, alongside the PPI stream; nothing is stored except the summary)
+const acc = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };
+const accLive = { on: false, ring: [] };   // always-on accelerometer: the last few seconds of samples
+const ACC_KEY = 'bad_acc_v13';
+let pendingAccMarker = null;
+const ACC_START = [0x02, 0x02, 0x00, 0x01, 0x34, 0x00, 0x01, 0x01, 0x10, 0x00, 0x02, 0x01, 0x08, 0x00, 0x04, 0x01, 0x03];   // 52 Hz, 16 bit, 8 g, 3 axes
+
+// Movement and arm orientation over the last 2 s before time t. null if the accelerometer is off or silent.
+function accNow(t) {
+  if (!accLive.on) return null;
+  const w = accLive.ring.filter(x => x[0] > t - 2000 && x[0] <= t);
+  if (w.length < 20) return null;
+  const mag = w.map(x => Math.hypot(x[1], x[2], x[3])), m = mag.reduce((p, c) => p + c, 0) / mag.length;
+  const sd = Math.sqrt(mag.reduce((p, c) => p + (c - m) * (c - m), 0) / mag.length);
+  const mean = i => Math.round(w.reduce((p, c) => p + c[i], 0) / w.length);
+  return { mov: Math.round(sd), ax: mean(1), ay: mean(2), az: mean(3) };
+}
+
+async function setAcc(on) {
+  if (!pmdControl || diag.running) return;
+  if (on) {
+    if (accLive.on) return;
+    const r = await pmdCommand(ACC_START, 4000);
+    accLive.on = !!(r.raw && (r.raw[3] === 0 || r.raw[3] === 6));
+    const info = { ok: accLive.on, reply: r.raw ? hexOf(r.raw) : (r.timeout ? 'timeout' : (r.error || '?')) };
+    if (rec.id !== null) addMarker('sensor:acc_start', 'system', info); else pendingAccMarker = info;   // the session starts a moment later
+    log(accLive.on ? 'Accelerometro acceso (52 Hz): movimento e orientamento del braccio entrano nei dati.' : 'Accelerometro non avviato. ' + describeReply('Risposta', r));
+  } else {
+    accLive.on = false; accLive.ring = [];
+    await pmdCommand([0x03, 0x02], 3000);
+    log('Accelerometro spento.');
+  }
+  refresh();
+}   // samples: [t_ms, x, y, z] in milli-g
+
+function signedLE(u8, o, size) {
+  let v = 0; for (let j = size - 1; j >= 0; j--) v = v * 256 + u8[o + j];
+  const lim = Math.pow(2, size * 8 - 1);
+  return v >= lim ? v - 2 * lim : v;
+}
+
+// Frame: byte 0 type (2 = ACC), bytes 1-8 timestamp, byte 9 frame type (bit 7 = delta compressed), then the content.
+function parseAccFrame(dv) {
+  if (dv.byteLength < 11) return null;
+  const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const ft = u8[9], comp = (ft & 0x80) !== 0, type = ft & 0x7f;
+  const size = type === 0 ? 1 : type === 1 ? 2 : type === 2 ? 3 : 0;
+  if (!size) return { ft, samples: null };
+  const body = u8.subarray(10), out = [];
+  if (!comp) {
+    for (let o = 0; o + 3 * size <= body.length; o += 3 * size) out.push([signedLE(body, o, size), signedLE(body, o + size, size), signedLE(body, o + 2 * size, size)]);
+    return { ft, samples: out };
+  }
+  if (body.length < 3 * size) return { ft, samples: null };
+  out.push([signedLE(body, 0, size), signedLE(body, size, size), signedLE(body, 2 * size, size)]);
+  let off = 3 * size;
+  while (off + 1 < body.length) {
+    const w = body[off++], n = body[off++], bits = n * w * 3, len = Math.ceil(bits / 8);
+    if (w === 0 || off + len > body.length) break;
+    let bit = 0;
+    for (let k = 0; k < n; k++) {
+      const prev = out[out.length - 1], cur = [];
+      for (let ch = 0; ch < 3; ch++) {
+        let v = 0;
+        for (let i = 0; i < w; i++, bit++) if (body[off + (bit >> 3)] & (1 << (bit & 7))) v |= (1 << i);
+        if (v & (1 << (w - 1))) v -= (1 << w);
+        cur.push(prev[ch] + v);
+      }
+      out.push(cur);
+    }
+    off += len;
+  }
+  return { ft, samples: out };
+}
+
+function onAccFrame(dv) {
+  if ((!acc.active && !accLive.on) || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 2) return;
+  const r = parseAccFrame(dv);
+  const now = Date.now();
+  acc.frames++;
+  if (!acc.firstHex) acc.firstHex = hexOf(new Uint8Array(dv.buffer, dv.byteOffset, Math.min(dv.byteLength, 24)));
+  if (!r || !r.samples) { acc.bad++; return; }
+  acc.types[r.ft] = (acc.types[r.ft] || 0) + 1;
+  const n = r.samples.length;
+  r.samples.forEach((sm, i) => {
+    const row = [now - Math.round((n - 1 - i) * 1000 / 52), sm[0], sm[1], sm[2]];
+    if (acc.active) acc.samples.push(row);
+    if (accLive.on) accLive.ring.push(row);
+  });
+  if (accLive.on) {
+    const cut = now - 6000;
+    let k = 0; while (k < accLive.ring.length && accLive.ring[k][0] < cut) k++;
+    if (k) accLive.ring.splice(0, k);
+  }
+}
+
+async function runAccTest() {
+  if (acc.active || diag.running) return;
+  if (!connected || !pmdControl) { log('Collega prima il sensore.'); return; }
+  const SECS = 30;
+  acc.active = true; acc.frames = 0; acc.firstHex = null; acc.types = {}; acc.bad = 0; acc.samples = [];
+  diag.running = true; $('accBtn').disabled = true; $('capBtn').disabled = true;
+  const out = $('capOut'); out.style.display = ''; out.textContent = 'Test accelerometro: avvio...';
+  const rowsBefore = rec.rows.length, t0 = Date.now();
+  const lines = [`Test accelerometro | ${new Date().toLocaleString()} | ${btDevice ? btDevice.name : '?'}`];
+  const already = accLive.on;
+  const start = already ? { raw: [0xF0, 2, 2, 0, 0] } : await pmdCommand(ACC_START, 4000);
+  lines.push(already ? 'Accelerometro già acceso (modalità continua).' : describeReply('Avvio accelerometro (52 Hz, 16 bit, 8 g, 3 assi)', start));
+  const startedOk = start.raw && start.raw[3] === 0;
+  if (startedOk) {
+    for (let s = 0; s < SECS; s++) {
+      const phase = s < 10 ? 'Fermo, braccio appoggiato' : s < 20 ? 'Muovi il braccio (alza, ruota, scuoti piano)' : 'Fermo di nuovo';
+      out.textContent = `Test accelerometro: ${SECS - s} s. ${phase}.`;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (!already) lines.push(describeReply('Stop accelerometro', await pmdCommand([0x03, 0x02], 3000)));
+  }
+  acc.active = false;
+  const rowsDuring = rec.rows.slice(rowsBefore);
+  const valid = rowsDuring.filter(r => !(r[4] & 1) && r[3] <= 30).length;
+  if (startedOk) {
+    const sm = acc.samples;
+    lines.push(`Frame ricevuti: ${acc.frames} (non letti: ${acc.bad}) | tipi di frame (byte): ${Object.keys(acc.types).map(k => '0x' + Number(k).toString(16) + ' x' + acc.types[k]).join(', ') || 'nessuno'}`);
+    lines.push(`Campioni: ${sm.length} in ${SECS} s = ${(sm.length / SECS).toFixed(1)} al secondo (atteso 52)`);
+    if (acc.firstHex) lines.push(`Primo frame (inizio): ${acc.firstHex}`);
+    const thirds = [[0, 10], [10, 20], [20, 30]].map(([a, b]) => {
+      const w = sm.filter(x => x[0] >= t0 + 1000 + a * 1000 && x[0] < t0 + 1000 + b * 1000);
+      if (w.length < 5) return null;
+      const mag = w.map(x => Math.hypot(x[1], x[2], x[3])), m = mag.reduce((p, c) => p + c, 0) / mag.length;
+      const sd = Math.sqrt(mag.reduce((p, c) => p + (c - m) * (c - m), 0) / mag.length);
+      const mean = i => Math.round(w.reduce((p, c) => p + c[i], 0) / w.length);
+      return `${a}-${b} s: n ${w.length}, modulo medio ${Math.round(m)} mG, variazione ${Math.round(sd)} mG, vettore medio (${mean(1)}, ${mean(2)}, ${mean(3)})`;
+    });
+    thirds.forEach((t, i) => lines.push(['Fermo', 'Movimento', 'Fermo'][i] + ' | ' + (t || 'pochi campioni')));
+    lines.push(`Intervalli PPI arrivati nel frattempo: ${rowsDuring.length} (validi ${valid}) in ${SECS} s`);
+  }
+  diag.running = false; diag.waiting = null; $('accBtn').disabled = false; $('capBtn').disabled = false;
+  const text = lines.join('\n');
+  out.textContent = text; $('capCopyBtn').style.display = '';
+  addMarker('sensor:acc_test', 'system', { text });
+  log('Test accelerometro finito (salvato anche nella registrazione).');
+  syncSoon();
+}
+
+// ---------------------------------------------------------------- raw PPG test (30 s, alongside PPI and accelerometer; only a summary and a short excerpt are stored)
+// Verity Sense in normal mode: 55 Hz, 22 bit, 4 channels (3 PPG + 1 ambient). Frame type 0 = 4 x 24-bit signed samples; bit 7 of the frame type = delta compressed.
+const ppg = { active: false, frames: 0, firstHex: null, types: {}, bad: 0, samples: [] };   // samples: [t_ms, c0, c1, c2, c3]
+const PPG_START = [0x02, 0x01, 0x00, 0x01, 0x37, 0x00, 0x01, 0x01, 0x16, 0x00, 0x04, 0x01, 0x04];   // 55 Hz, 22 bit, 4 channels
+
+function parsePpgFrame(dv) {
+  if (dv.byteLength < 11) return null;
+  const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const ft = u8[9], comp = (ft & 0x80) !== 0, type = ft & 0x7f;
+  if (type !== 0) return { ft, samples: null };   // other frame types are counted, not decoded
+  const CH = 4, SIZE = 3, body = u8.subarray(10), out = [];
+  if (!comp) {
+    for (let o = 0; o + CH * SIZE <= body.length; o += CH * SIZE) { const s = []; for (let c = 0; c < CH; c++) s.push(signedLE(body, o + c * SIZE, SIZE)); out.push(s); }
+    return { ft, samples: out };
+  }
+  if (body.length < CH * SIZE) return { ft, samples: null };
+  const ref = []; for (let c = 0; c < CH; c++) ref.push(signedLE(body, c * SIZE, SIZE));
+  out.push(ref);
+  let off = CH * SIZE;
+  while (off + 1 < body.length) {
+    const w = body[off++], n = body[off++], bits = n * w * CH, len = Math.ceil(bits / 8);
+    if (w === 0 || off + len > body.length) break;
+    let bit = 0;
+    for (let k = 0; k < n; k++) {
+      const prev = out[out.length - 1], cur = [];
+      for (let ch = 0; ch < CH; ch++) {
+        let v = 0;
+        for (let i = 0; i < w; i++, bit++) if (body[off + (bit >> 3)] & (1 << (bit & 7))) v |= (1 << i);
+        if (v & (1 << (w - 1))) v -= (1 << w);
+        cur.push(prev[ch] + v);
+      }
+      out.push(cur);
+    }
+    off += len;
+  }
+  return { ft, samples: out };
+}
+
+function onPpgFrame(dv) {
+  if ((!ppg.active && !ppgRec.on) || dv.byteLength < 10 || (dv.getUint8(0) & 0x3f) !== 1) return;
+  const r = parsePpgFrame(dv);
+  const now = Date.now();
+  if (ppg.active) {
+    ppg.frames++;
+    if (!ppg.firstHex) ppg.firstHex = hexOf(new Uint8Array(dv.buffer, dv.byteOffset, Math.min(dv.byteLength, 24)));
+  }
+  if (!r || !r.samples) { if (ppg.active) { ppg.bad++; if (r) ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1; } return; }
+  const n = r.samples.length;
+  if (ppg.active) {
+    ppg.types[r.ft] = (ppg.types[r.ft] || 0) + 1;
+    r.samples.forEach((sm, i) => ppg.samples.push([now - Math.round((n - 1 - i) * 1000 / 55), sm[0], sm[1], sm[2], sm[3]]));
+  }
+  if (ppgRec.on) {
+    let fts = null;
+    try { fts = Number(dv.getBigUint64(1, true) / 1000000n) + 946684800000; } catch (e) { /* no BigInt: leave null */ }
+    const f = [fts, now];
+    r.samples.forEach((sm, i) => { for (let c = 0; c < 4; c++) f.push(i === 0 ? sm[c] : sm[c] - r.samples[i - 1][c]); });
+    ppgRec.frames.push(f);
+  }
+}
+
+// Start or stop the raw PPG recording (opt-in, see PPG_KEY). The test below leaves a running recording alone.
+async function setPpgRec(on) {
+  if (!pmdControl || diag.running) return;
+  if (on) {
+    if (ppgRec.on) return;
+    const r = await pmdCommand(PPG_START, 4000);
+    ppgRec.on = !!(r.raw && (r.raw[3] === 0 || r.raw[3] === 6));
+    const info = { ok: ppgRec.on, reply: r.raw ? hexOf(r.raw) : (r.timeout ? 'timeout' : (r.error || '?')) };
+    if (rec.id !== null) addMarker('sensor:ppg_start', 'system', info);
+    log(ppgRec.on ? 'PPG grezzo acceso (55 Hz, 4 canali): i campioni si registrano a parte.' : 'PPG grezzo non avviato. ' + describeReply('Risposta', r));
+  } else {
+    ppgRec.on = false;
+    await pmdCommand([0x03, 0x01], 3000);
+    log('PPG grezzo spento.');
+  }
+  refresh();
+}
+
+async function runPpgTest() {
+  if (ppg.active || acc.active || diag.running) return;
+  if (!connected || !pmdControl) { log('Collega prima il sensore.'); return; }
+  const SECS = 30;
+  diag.running = true; $('ppgBtn').disabled = true; $('accBtn').disabled = true; $('capBtn').disabled = true;
+  const out = $('capOut'); out.style.display = ''; out.textContent = 'Test PPG grezzo: avvio...';
+  const lines = [`Test PPG grezzo | ${new Date().toLocaleString()} | ${btDevice ? btDevice.name : '?'}`];
+  try {
+    // the accelerometer is normally on already; the test checks the three streams together
+    diag.running = false;
+    if (!accLive.on) { try { await setAcc(true); } catch (e) { /* reported below */ } }
+    diag.running = true;
+    lines.push(accLive.on ? 'Accelerometro acceso (modalità continua).' : 'Accelerometro NON acceso: la convivenza a tre non è verificata.');
+    ppg.frames = 0; ppg.firstHex = null; ppg.types = {}; ppg.bad = 0; ppg.samples = [];
+    acc.frames = 0; acc.types = {}; acc.bad = 0; acc.samples = []; acc.firstHex = null;
+    const rowsBefore = rec.rows.length, t0 = Date.now();
+    const alreadyRec = ppgRec.on;
+    const start = alreadyRec ? { raw: [0xF0, 2, 1, 0, 0] } : await pmdCommand(PPG_START, 4000);
+    lines.push(alreadyRec ? 'PPG già acceso (registrazione continua).' : describeReply('Avvio PPG (55 Hz, 22 bit, 4 canali)', start));
+    const startedOk = start.raw && (start.raw[3] === 0 || start.raw[3] === 6);
+    if (startedOk) {
+      ppg.active = true; acc.active = true;
+      for (let s = 0; s < SECS; s++) {
+        out.textContent = `Test PPG grezzo: ${SECS - s} s. Braccio fermo, sensore addosso come sempre.`;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      ppg.active = false; acc.active = false;
+      if (!alreadyRec) lines.push(describeReply('Stop PPG', await pmdCommand([0x03, 0x01], 3000)));
+      const sm = ppg.samples, rowsDuring = rec.rows.slice(rowsBefore);
+      const valid = rowsDuring.filter(r => !(r[4] & 1) && r[3] <= 30).length;
+      lines.push(`Frame PPG ricevuti: ${ppg.frames} (non letti: ${ppg.bad}) | tipi di frame (byte): ${Object.keys(ppg.types).map(k => '0x' + Number(k).toString(16) + ' x' + ppg.types[k]).join(', ') || 'nessuno'}`);
+      lines.push(`Campioni PPG: ${sm.length} in ${SECS} s = ${(sm.length / SECS).toFixed(1)} al secondo (atteso 55)`);
+      if (ppg.firstHex) lines.push(`Primo frame PPG (inizio): ${ppg.firstHex}`);
+      ['canale 0', 'canale 1', 'canale 2', 'ambiente (canale 3)'].forEach((name, c) => {
+        const v = sm.map(x => x[c + 1]);
+        if (v.length < 60) { lines.push(`${name}: pochi campioni`); return; }
+        const mean = v.reduce((p, q) => p + q, 0) / v.length;
+        // pulse amplitude proxy: peak-to-peak of the 1 s moving average removed signal, median over 1 s windows
+        const win = 55, ptp = [];
+        for (let i = 0; i + win <= v.length; i += win) {
+          const w = v.slice(i, i + win), m = w.reduce((p, q) => p + q, 0) / w.length, d = w.map(x => x - m);
+          ptp.push(Math.max(...d) - Math.min(...d));
+        }
+        ptp.sort((a, b) => a - b);
+        lines.push(`${name}: media ${Math.round(mean)}, min ${Math.min(...v)}, max ${Math.max(...v)}, ampiezza picco-picco per secondo (mediana) ${Math.round(ptp[Math.floor(ptp.length / 2)])}`);
+      });
+      lines.push(`Accelerometro nello stesso tempo: ${acc.samples.length} campioni = ${(acc.samples.length / SECS).toFixed(1)} al secondo (atteso 52), frame non letti ${acc.bad}`);
+      lines.push(`Intervalli PPI arrivati nel frattempo: ${rowsDuring.length} (validi ${valid}) in ${SECS} s`);
+      // a short raw excerpt (first 3 s, all 4 channels) so the signal shape can be checked offline
+      const ex = sm.slice(0, 165);
+      addMarker('sensor:ppg_excerpt', 'system', { rate_hz: 55, channels: 4, order: 'c0,c1,c2,ambient', samples: ex.map(x => x.slice(1)) });
+    }
+  } catch (e) { lines.push('Test interrotto: ' + e.message); }
+  ppg.active = false; acc.active = false;
+  diag.running = false; diag.waiting = null; $('ppgBtn').disabled = false; $('accBtn').disabled = false; $('capBtn').disabled = false;
+  const text = lines.join('\n');
+  out.textContent = text; $('capCopyBtn').style.display = '';
+  addMarker('sensor:ppg_test', 'system', { text });
+  log('Test PPG grezzo finito (salvato anche nella registrazione).');
+  syncSoon();
+}
+
+// ---------------------------------------------------------------- sensor capabilities (read only: nothing is changed on the sensor)
+const hexOf = u8 => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(' ');
+const PMD_TYPES = { 0: 'ECG', 1: 'PPG', 2: 'ACC', 3: 'PPI', 5: 'gyroscope', 6: 'magnetometer' };
+const PMD_STATUS = { 0: 'ok', 1: 'invalid op code', 2: 'invalid measurement type', 3: 'not supported', 4: 'invalid length', 5: 'invalid parameter', 6: 'already in state', 12: 'invalid state', 13: 'device in charger' };
+
+function pmdCommand(bytes, timeoutMs) {
+  return new Promise(resolve => {
+    diag.expect = [bytes[0], bytes.length > 1 ? bytes[1] : null];
+    const t = setTimeout(() => { diag.waiting = null; resolve({ timeout: true }); }, timeoutMs || 3000);
+    diag.waiting = r => { clearTimeout(t); resolve({ raw: r }); };
+    pmdControl.writeValueWithResponse(new Uint8Array(bytes)).catch(err => { clearTimeout(t); diag.waiting = null; resolve({ error: err.message }); });
+  });
+}
+
+// settings payload: [type, count, values...]; types 0,1,2 are 16-bit, 3 and 5 are 32-bit, 4 is 8-bit
+function parseSettings(b) {
+  const names = { 0: 'sample rate (Hz)', 1: 'resolution (bit)', 2: 'range', 3: 'range (milli-unit)', 4: 'channels', 5: 'factor' };
+  const out = [];
+  let i = 0;
+  while (i + 1 < b.length) {
+    const type = b[i], n = b[i + 1], size = (type === 4) ? 1 : (type === 3 || type === 5) ? 4 : 2;
+    i += 2;
+    const vals = [];
+    for (let k = 0; k < n && i + size <= b.length; k++, i += size) {
+      let v = 0; for (let j = size - 1; j >= 0; j--) v = v * 256 + b[i + j];
+      vals.push(v);
+    }
+    out.push(`${names[type] || 'setting ' + type}: ${vals.join(', ')}`);
+  }
+  return out.join('; ');
+}
+
+function describeReply(label, r) {
+  if (r.timeout) return `${label}: no answer in 3 s`;
+  if (r.error) return `${label}: write failed (${r.error})`;
+  const b = r.raw;
+  if (b.length < 4 || b[0] !== 0xF0) return `${label}: unexpected reply [${hexOf(b)}]`;
+  const status = PMD_STATUS[b[3]] || ('code ' + b[3]);
+  const params = b.slice(5);
+  return `${label}: ${status}${b[3] === 0 && params.length ? ' | ' + hexOf(params) : ''}${b[3] === 0 && b[1] === 1 && params.length ? ' | ' + parseSettings(params) : ''}   [${hexOf(b)}]`;
+}
+
+async function checkCapabilities() {
+  if (diag.running) return;
+  if (!connected || !pmdControl) { log('Collega prima il sensore: il controllo legge le capacità dal sensore collegato.'); return; }
+  diag.running = true; $('capBtn').disabled = true;
+  const lines = [`Sensore: ${btDevice ? btDevice.name : '?'} | ${new Date().toLocaleString()}`];
+  try {
+    try {
+      const f = await pmdControl.readValue();
+      const u8 = new Uint8Array(f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
+      const types = u8.length > 1 ? Object.entries(PMD_TYPES).filter(([bit]) => u8[1] & (1 << Number(bit))).map(([, n]) => n) : [];
+      lines.push(`Funzioni dichiarate dal sensore (PMD): ${types.join(', ') || 'nessuna letta'}   [${hexOf(u8)}]`);
+    } catch (e) { lines.push('Funzioni dichiarate: lettura non riuscita (' + e.message + ')'); }
+    lines.push(describeReply('Modalità SDK (stato; 00 = spenta, 01 = accesa)', await pmdCommand([0x06])));
+    lines.push(describeReply('Impostazioni accelerometro in modalità normale', await pmdCommand([0x01, 0x02])));
+    lines.push(describeReply('Impostazioni PPG in modalità normale', await pmdCommand([0x01, 0x01])));
+    lines.push(describeReply('Impostazioni intervalli PPI', await pmdCommand([0x01, 0x03])));
+    try {
+      const di = await btServer.getPrimaryService('device_information');
+      for (const [name, label] of [['firmware_revision_string', 'Firmware'], ['model_number_string', 'Modello']]) {
+        try { const v = await (await di.getCharacteristic(name)).readValue(); lines.push(`${label}: ${new TextDecoder().decode(v).replace(/\0/g, '')}`); }
+        catch (e) { lines.push(`${label}: non letto`); }
+      }
+    } catch (e) { lines.push('Informazioni del dispositivo (firmware, modello): servizio non accessibile'); }
+    try {
+      const bs = await btServer.getPrimaryService('battery_service');
+      const v = await (await bs.getCharacteristic('battery_level')).readValue();
+      lines.push(`Batteria: ${v.getUint8(0)}%`);
+    } catch (e) { lines.push('Batteria: non letta'); }
+  } catch (e) { lines.push('Controllo interrotto: ' + e.message); }
+  diag.running = false; $('capBtn').disabled = false; diag.waiting = null;
+  const text = lines.join('\n');
+  $('capOut').textContent = text; $('capOut').style.display = ''; $('capCopyBtn').style.display = '';
+  addMarker('sensor:capabilities', 'system', { text });
+  log('Controllo delle capacità completato (salvato anche nella registrazione).');
+  syncSoon();
+}
+
+function scheduleReconnect() {
+  if (!wantConnected || reconnectTimer) return;
+  reconnectTries++;
+  const wait = Math.min(30000, 3000 * reconnectTries);
+  reconnecting = true; refresh();
+  log(`Provo a ricollegare il sensore tra ${Math.round(wait / 1000)} s (tentativo ${reconnectTries}).`);
+  reconnectTimer = setTimeout(async () => {
+    reconnectTimer = null;
+    if (!wantConnected || connected) return;
+    try {
+      await openGatt(btDevice);
+      connected = true; reconnecting = false; reconnectTries = 0; $('connectBtn').disabled = true;
+      newSessionIfNeeded(btDevice.name);
+      addMarker('sensor:reconnected', 'system');
+      log('Sensore ricollegato. La registrazione continua.');
+      refresh();
+    } catch (err) {
+      log('Ricollegamento non riuscito: ' + err.message);
+      scheduleReconnect();
+    }
+  }, wait);
+}
+
+async function connect() {
+  try {
+    if (!navigator.bluetooth) { log('Web Bluetooth is not available in this browser. Use Chrome or Edge on desktop or Android.'); return; }
+    audio(); // sounds need a first tap on the page
+    log('Requesting Polar device...');
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Polar' }, { services: ['heart_rate'] }],
+      optionalServices: [PMD_SERVICE, 'heart_rate', 'battery_service', 'device_information']
+    });
+    log(`Device selected: ${device.name}`);
+    btDevice = device; wantConnected = true; reconnectTries = 0;
+    device.addEventListener('gattserverdisconnected', () => {
+      connected = false; $('connectBtn').disabled = false; accLive.on = false; accLive.ring = []; ppgRec.on = false;
+      flushRecording();
+      if (wantConnected) {
+        addMarker('sensor:disconnected', 'system');
+        log('Sensore scollegato. La registrazione fin qui è salvata.');
+        scheduleReconnect();
+      } else { log('Sensore scollegato.'); }
+      refresh();
+    });
+    await openGatt(device);
+    connected = true; reconnecting = false; $('connectBtn').disabled = true; $('simBtn').disabled = true;
+    newSessionIfNeeded(device.name);
+    setWake($('wakeChk').checked);
+    log('PPI stream requested. The first beats can take about 25 s, stay still.');
+    refresh();
+  } catch (err) {
+    log(`Bluetooth error: ${err.message}`);
+    console.error(err);
+    if (!connected) { wantConnected = false; clearTimeout(reconnectTimer); reconnectTimer = null; }
+  }
+}
+
+// ---------------------------------------------------------------- live display
+function describeRules() {
+  const c = engine.config, pct = x => Math.round(x * 100);
+  $('phasicRule').textContent = `BPM >= base +${c.PHASIC_BPM_RISE} and rMSSD down ${pct(c.PHASIC_DROP_PERCENT)}% or more` +
+    (c.PHASIC_MIN_S > 0 ? `, held for ${c.PHASIC_MIN_S}s of valid samples.` : ', on one sample.') +
+    (c.MOVEMENT_CONTEXT === 'tag' ? ` If the movement bit is set on at least ${Math.round(c.MOVEMENT_BLOCKED_FRACTION * 100)}% of the samples in the ${c.MOVEMENT_WINDOW_S}s before, any trigger (phasic or tonic) is logged as "after movement" and stays silent.` : '') +
+    (c.PHASIC_MAX_ONSET_S == null ? '' : ` Only if reached within ${c.PHASIC_MAX_ONSET_S}s from the start of the rise; later it counts as tonic.`);
+  $('tonicRule').textContent = `BPM >= base +${c.TONIC_BPM_RISE} and rMSSD down ${pct(c.TONIC_DROP_PERCENT)}% or more, for ${c.TONIC_PERSISTENCE_SECONDS}s counted on valid samples.` +
+    (c.FREEZE_BASELINE_WHILE_ELEVATED ? ' Baseline held while the rise lasts.' : '') +
+    (c.STATE_MACHINE_MODE ? ' Paused, and persistence restarted, during LOCOMOTION, RECOVERY and TRANSITION_HOLD.' : '');
+  $('quietRule').textContent = !c.QUIET_ENABLED ? 'Disabled in the config.' :
+    `BPM <= reference +${c.QUIET_BPM_MARGIN}, rMSSD not below reference by more than ${pct(c.QUIET_RMSSD_TOLERANCE)}%, body still, for ${c.QUIET_DURATION_MIN} min. Max ${c.QUIET_MAX_PER_DAY} a day, never ${c.QUIET_HOURS_START}:00-${c.QUIET_HOURS_END}:00. Stillness is read from the sensor's movement bit, not from the accelerometer.`;
+}
+
+const ANS_VIEW = {
+  SYMPATHETIC: ['SYMPATHETIC', 'ans-sympathetic'], CO_ACTIVATION: ['CO-ACTIVATION', 'ans-coactivation'],
+  PARASYMPATHETIC: ['PARASYMPATHETIC', 'ans-parasympathetic'], BALANCED: ['BALANCED / TRANSITION', 'ans-balanced']
+};
+
+function refresh() {
+  const s = engine.getState(), c = engine.config, now = Date.now();
+  $('liveBpm').textContent = s.bpm || '--';
+  $('liveRmssd').textContent = s.rmssd == null ? '--' : s.rmssd;
+  $('baseBpm').textContent = `Base: ${s.baseBpm || '--'} BPM`;
+  $('baseRmssd').textContent = `Median: ${s.baseRmssd || '--'} ms`;
+  const ans = ANS_VIEW[s.ans] || ANS_VIEW.BALANCED;
+  $('ansState').textContent = ans[0]; $('ansState').className = 'ans-badge ' + ans[1];
+
+  const coolLeft = s.cooldownUntil ? Math.ceil((s.cooldownUntil - now) / 1000) : 0;
+  const inCooldown = coolLeft > 0;
+  $('cooldownVal').textContent = inCooldown ? `${Math.floor(coolLeft / 60)}m ${String(coolLeft % 60).padStart(2, '0')}s` : 'READY';
+  $('bioState').textContent = `Stato: ${s.actState || 'STILL_REST'}`;
+  $('freezeStatus').textContent = inCooldown ? 'Baseline: frozen' : (s.waitingRelease ? 'Waiting for the rise to end' : 'Baseline: active');
+  $('freezeStatus').style.color = inCooldown ? '#f87171' : (s.waitingRelease ? '#fbbf24' : '#38bdf8');
+
+  const pill = $('statusPill');
+  const silent = connected && (s.lastValidTs === null ? (rec.startedAt !== null && now - rec.startedAt > 40000) : now - s.lastValidTs > 15000);
+  if (!connected && reconnecting) { pill.textContent = 'Reconnecting'; pill.className = 'status-pill triggered'; }
+  else if (!connected) { pill.textContent = 'Disconnected'; pill.className = 'status-pill'; }
+  else if (silent) { pill.textContent = (now - lastRowRx < 15000) ? 'Sensore: segnale non valido' : 'Sensore: nessun dato'; pill.className = 'status-pill connected'; }
+  else if (inCooldown) { pill.textContent = 'Triggered / cooldown'; pill.className = 'status-pill triggered'; }
+  else if (s.monitoring) { pill.textContent = 'Surveillance active'; pill.className = 'status-pill monitoring'; }
+  else { pill.textContent = 'Learning baseline'; pill.className = 'status-pill connected'; }
+
+  const need = c.MIN_BASELINE_SAMPLES, have = Math.min(s.baselineCount, need);
+  $('bufferCounter').textContent = `${have} / ${need} samples to arm · window ${s.baselineCount} / ${c.MAX_BASELINE_HISTORY}`;
+  $('progressBar').style.width = `${(have / need) * 100}%`;
+
+  const tonic = Math.min(s.tonicSeconds, c.TONIC_PERSISTENCE_SECONDS);
+  $('tonicProgressBar').style.width = `${(tonic / c.TONIC_PERSISTENCE_SECONDS) * 100}%`;
+  $('tonicCounterText').textContent = `Persistence: ${Math.floor(tonic)}s / ${c.TONIC_PERSISTENCE_SECONDS}s`;
+
+  const q = s.quiet;
+  if (!c.QUIET_ENABLED) { $('quietText').textContent = 'Disabled'; $('quietProgressBar').style.width = '0%'; }
+  else if (!q) { $('quietText').textContent = 'Waiting for data'; $('quietProgressBar').style.width = '0%'; }
+  else if (q.ref_bpm == null) {
+    $('quietText').textContent = `Building the slow reference: needs ${c.QUIET_MIN_HISTORY_MIN} min of data.`;
+    $('quietProgressBar').style.width = '0%';
+  } else {
+    $('quietProgressBar').style.width = `${Math.min(100, (q.covered_min / c.QUIET_DURATION_MIN) * 100)}%`;
+    $('quietText').textContent = `Window ${q.covered_min.toFixed(0)}/${c.QUIET_DURATION_MIN} min · in condition ${Math.round(q.ok_fraction * 100)}% · movement ${Math.round(q.moved_fraction * 100)}% · ref ${q.ref_bpm} BPM, ${q.ref_rmssd} ms (${q.ref_source === 'rest' ? 'resting values' : 'slow baseline'}) · today ${q.count_today}/${c.QUIET_MAX_PER_DAY}` + (q.armed ? '' : ' · already invited for this stretch');
+  }
+
+  if (s.total > 0) {
+    const r = s.rejected;
+    $('signalText').textContent = `Samples: ${s.total} · valid ${Math.round((s.accepted / s.total) * 100)}% · discarded: movement ${r.blocker}, out of range ${r.range}, error estimate ${r.error_estimate}, no HR ${r.hr}`;
+  }
+  if (rec.id !== null) {
+    $('recText').textContent = `Recording: ${rec.rows.length} samples since ${new Date(rec.startedAt).toLocaleTimeString()} · ${rec.markers.length} marker${rec.markers.length === 1 ? '' : 's'} · ` +
+      (rec.db ? 'saved in this browser every 15 s' : 'in memory only, export before closing') +
+      (connected ? ` · accelerometro ${accLive.on ? (() => { const a = accNow(Date.now()); return a ? (a.mov >= 40 ? `movimento (${a.mov} mG)` : `fermo (${a.mov} mG)`) : 'acceso, in attesa di dati'; })() : 'spento'}` + (ppgRec.on ? ` · PPG grezzo registrato (${ppgRec.frames.length} frame)` : '') : '');
+  }
+}
+
+// ---------------------------------------------------------------- replay
+function readOverrides() {
+  const text = $('configBox').value.trim() || '{}';
+  const obj = JSON.parse(text);
+  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('The overrides must be a JSON object, like {"PHASIC_MAX_ONSET_S": 10}');
+  const unknown = Object.keys(obj).filter(k => !(k in DEFAULT_CONFIG));
+  for (const k of unknown) delete obj[k];
+  return { overrides: obj, unknown };
+}
+
+function samplesFromPayload(p) {
+  const raw = Array.isArray(p) ? p : p && p.samples;
+  if (!Array.isArray(raw) || !raw.length) throw new Error('No samples found in this file.');
+  const cols = (p && Array.isArray(p.columns)) ? p.columns : COLUMNS;
+  const ix = k => cols.indexOf(k);
+  const lateIx = cols.indexOf('late');
+  return raw.filter(r => !(Array.isArray(r) && lateIx >= 0 && r[lateIx] === 1)).map(r => {
+    if (Array.isArray(r)) {
+      const flags = ix('flags') >= 0 ? r[ix('flags')] : 0;
+      return { ts: r[ix('ts')], ppi: r[ix('ppi')], hr: r[ix('hr')], err: ix('err') >= 0 ? r[ix('err')] : null, blocker: (flags & 1) === 1, mov: ix('mov') >= 0 && r[ix('mov')] != null ? r[ix('mov')] : null, ax: ix('ax') >= 0 ? r[ix('ax')] : null, ay: ix('ay') >= 0 ? r[ix('ay')] : null, az: ix('az') >= 0 ? r[ix('az')] : null };
+    }
+    return { ts: r.ts, ppi: r.ppi, hr: r.hr, err: r.err == null ? null : r.err, blocker: !!(r.blocker || ((r.flags || 0) & 1)), mov: r.mov == null ? null : r.mov, ax: r.ax == null ? null : r.ax, ay: r.ay == null ? null : r.ay, az: r.az == null ? null : r.az };
+  });
+}
+
+function countTypes(events) {
+  const n = { phasic_acute: 0, tonic_sustained: 0, window_score: 0, quiet_prolonged: 0 };
+  for (const e of events) if (e.trigger_type in n) n[e.trigger_type]++;
+  return `${n.phasic_acute} phasic, ${n.tonic_sustained} tonic, ${n.window_score} window, ${n.quiet_prolonged} quiet`;
+}
+
+function formatStateBreakdown(stateCounts) {
+  const total = Object.values(stateCounts || {}).reduce((a, b) => a + b, 0);
+  if (!total) return '';
+  return Object.entries(stateCounts).filter(([, c]) => c > 0).map(([k, c]) => `${k} ${Math.round((c / total) * 100)}%`).join(' · ');
+}
+
+// ---- ZIP of the data repository (data/rec_<id>/00001.json ...): read in the browser, chunks of one session merged. Stored or
+// deflated entries only; the PPG files (ppg_*.json) are skipped.
+let loadedZipSessions = {};   // { rec_id: { session_id, started_at, device, columns, samples, markers, events } }
+
+async function parseZipSessions(file) {
+  const buf = await file.arrayBuffer();
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let eocd = -1;                                                        // end-of-central-directory record
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('File ZIP non valido.');
+  const cdCount = dv.getUint16(eocd + 10, true);
+  let cdOff = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const rawChunks = {};                                                 // rec_id -> [{ file, obj }]
+  for (let idx = 0; idx < cdCount && cdOff + 46 <= u8.length; idx++) {
+    if (dv.getUint32(cdOff, true) !== 0x02014b50) break;               // central directory entry signature (PK 01 02)
+    const method = dv.getUint16(cdOff + 10, true), compSize = dv.getUint32(cdOff + 20, true);
+    const nameLen = dv.getUint16(cdOff + 28, true), extraLen = dv.getUint16(cdOff + 30, true), commentLen = dv.getUint16(cdOff + 32, true);
+    const lfhOff = dv.getUint32(cdOff + 42, true);
+    const name = dec.decode(u8.subarray(cdOff + 46, cdOff + 46 + nameLen));
+    cdOff += 46 + nameLen + extraLen + commentLen;
+    const m = name.match(/data\/(rec_[^/]+)\/([^/]+\.json)$/);
+    if (!m || m[2].startsWith('ppg_')) continue;
+    const dataStart = lfhOff + 30 + dv.getUint16(lfhOff + 26, true) + dv.getUint16(lfhOff + 28, true);
+    const slice = u8.subarray(dataStart, dataStart + compSize);
+    let text;
+    if (method === 0) text = dec.decode(slice);
+    else if (method === 8) {
+      const ds = new DecompressionStream('deflate-raw');
+      const w = ds.writable.getWriter(); w.write(slice); w.close();
+      text = dec.decode(await new Response(ds.readable).arrayBuffer());
+    } else continue;
+    try { (rawChunks[m[1]] = rawChunks[m[1]] || []).push({ file: m[2], obj: JSON.parse(text) }); } catch (e) {}
+  }
+  const sessions = {};
+  for (const [recId, list] of Object.entries(rawChunks)) {
+    list.sort((a, b) => a.file.localeCompare(b.file));
+    const samples = [], markers = [];
+    let events = [], meta = null;
+    for (const { obj: d } of list) {
+      if (!meta) meta = { session_id: d.session_id || recId, started_at: d.started_at, device: d.device, columns: d.columns || COLUMNS, config: d.config };
+      if (Array.isArray(d.samples)) samples.push(...d.samples);
+      if (Array.isArray(d.markers)) markers.push(...d.markers);
+      if (Array.isArray(d.events) && d.events.length) events = d.events;
+    }
+    if (meta && samples.length) { meta.samples = samples; meta.markers = markers; meta.events = events; sessions[recId] = meta; }
+  }
+  return sessions;
+}
+
+// one line per session: how many triggers the default engine, the window detector and the states engine find
+function runBatchZipComparison() {
+  const out = $('replaySummary'), ids = Object.keys(loadedZipSessions);
+  if (!ids.length) return;
+  out.textContent = '';
+  out.appendChild(el('div', `Confronto su tutte le ${ids.length} sessioni dello ZIP (default | finestra | stati):`));
+  const cfgOf = id => SHADOW_CONFIGS.find(x => x.id === id).cfg;
+  for (const id of ids) {
+    let samples;
+    try { samples = samplesFromPayload(loadedZipSessions[id]); } catch (e) { continue; }
+    const nq = r => r.events.filter(e => e.trigger_type !== 'quiet_prolonged').length;
+    const a = replayRecording(samples, {}), b = replayRecording(samples, cfgOf('finestra')), c = replayRecording(samples, cfgOf('stati'));
+    const mins = ((samples[samples.length - 1].ts - samples[0].ts) / 60000).toFixed(1);
+    const cal = (loadedZipSessions[id].markers || []).some(m => m.label && m.label.startsWith('cal:'));
+    out.appendChild(el('div', `${id} (${mins} min${cal ? ', calibrazione' : ''}): ${nq(a)} | ${nq(b)} | ${nq(c)}  ·  stati: ${formatStateBreakdown(c.state.stateCounts)}`));
+  }
+}
+
+async function runReplay() {
+  const out = $('replaySummary');
+  try {
+    const { overrides, unknown } = readOverrides();
+    const source = $('replaySource').value;
+    let samples, recorded = null, markers = [], name;
+    if (source.startsWith('zip:')) {
+      const recId = source.slice(4), payload = loadedZipSessions[recId];
+      samples = samplesFromPayload(payload);
+      recorded = payload.events || null;
+      markers = payload.markers || [];
+      name = `${recId} (${new Date(payload.started_at).toLocaleString()})`;
+    } else if (source === 'file') {
+      const f = $('replayFile').files[0];
+      if (!f) throw new Error('Choose a recording file first, or pick a synthetic scenario.');
+      const payload = JSON.parse(await f.text());
+      samples = samplesFromPayload(payload);
+      recorded = Array.isArray(payload.events) ? payload.events : null;
+      markers = Array.isArray(payload.markers) ? payload.markers : [];
+      name = f.name;
+    } else {
+      samples = synthRecording(SYNTH_SCENARIOS[source].segments);
+      name = 'synthetic: ' + SYNTH_SCENARIOS[source].label;
+    }
+    const t0 = performance.now();
+    const res = replayRecording(samples, overrides);
+    const ms = Math.round(performance.now() - t0);
+    for (const e of res.events) if (source !== 'file' && !source.startsWith('zip:')) e.is_mock = true;
+    renderRows($('replayBody'), res.events, 'The engine found no trigger in this recording.');
+    const s = res.state, r = s.rejected, mins = ((samples[samples.length - 1].ts - samples[0].ts) / 60000).toFixed(1);
+    out.textContent = '';
+    const lines = [
+      `${name} · ${samples.length} samples over ${mins} min · replayed in ${ms} ms`,
+      `Valid ${Math.round((s.accepted / s.total) * 100)}% · discarded: movement ${r.blocker}, out of range ${r.range}, error estimate ${r.error_estimate}, no HR ${r.hr}`,
+      `Triggers with this config: ${countTypes(res.events)}` + (recorded ? ` · recorded live at the time: ${countTypes(recorded)}` : ''),
+      s.total && Object.values(s.stateCounts).some(c => c) ? `Stati: ${formatStateBreakdown(s.stateCounts)} · campioni sospesi dallo stato: ${s.suppressedByState}` : '',
+      Object.keys(overrides).length ? `Overrides used: ${JSON.stringify(overrides)}` : 'Default config.'
+    ];
+    if (markers.length) lines.push('Markers: ' + markers.map(m => `${new Date(m.ts).toLocaleTimeString()} ${m.label}`).join(' · '));
+    if (unknown.length) lines.push(`Unknown keys ignored: ${unknown.join(', ')}`);
+    for (const l of lines) if (l) out.appendChild(el('div', l));
+  } catch (e) {
+    out.textContent = 'Replay failed: ' + e.message;
+  }
+}
+
+// ================================================================ v1.3: session tools (phone-first)
+const PARAMS = new URLSearchParams(location.search);
+const FAST = Math.max(1, Number(PARAMS.get('fast')) || 1);  // test only: ?fast=30 makes every phase 30 times shorter
+const CI_TEST_S = Number(PARAMS.get('ci')) || 0;             // test only: ?ci=20 asks for a check-in every 20 s
+const SETTINGS_KEYS = { checkin: 'bad_checkin_v13', sync: 'bad_sync_v13', syncState: 'bad_sync_state_v13' };
+
+const store = {
+  get(key, dflt) {
+    try { const v = localStorage.getItem(key); return Object.assign({}, dflt, v ? JSON.parse(v) : {}); }
+    catch (e) { return Object.assign({}, dflt); }
+  },
+  set(key, v) {
+    try { localStorage.setItem(key, JSON.stringify(v)); }
+    catch (e) { log('Impossibile salvare le impostazioni in questo browser: ' + e.message); }
+  }
+};
+const gauss = () => Math.sqrt(-2 * Math.log(1 - Math.random())) * Math.cos(2 * Math.PI * Math.random());
+const pad2 = n => String(n).padStart(2, '0');
+const clock = ms => { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+const mmss = s => `${Math.floor(s / 60)}:${pad2(Math.max(0, Math.round(s % 60)))}`;
+
+// ---------------------------------------------------------------- markers, sounds, vibration
+function addMarker(label, kind, data) {
+  if (rec.id === null) return null;
+  const m = { ts: Date.now(), label, kind: kind || 'manual' };
+  if (data) m.data = data;
+  rec.markers.push(m); rec.dirty = true;
+  return m;
+}
+
+let audioCtx = null;
+function audio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (e) { return null; }
+  return audioCtx;
+}
+function playCue(freq) {
+  const ctx = audio(); if (!ctx) return;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = freq || 660;
+  g.gain.setValueAtTime(0.15, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+  o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.27);
+}
+// A sudden burst of noise, 0.4 s, sharp onset. How loud it is depends on the phone volume.
+function playBurst() {
+  const ctx = audio(); if (!ctx) return false;
+  const len = Math.floor(ctx.sampleRate * 0.4), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (len * 0.35));
+  const src = ctx.createBufferSource(), g = ctx.createGain();
+  src.buffer = buf; g.gain.value = 0.8; src.connect(g); g.connect(ctx.destination); src.start();
+  return true;
+}
+// A plain tone for checking the phone volume. Not the sudden sound itself, so that one stays a surprise.
+function playTestTone() {
+  const ctx = audio(); if (!ctx) return false;
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = 660;
+  g.gain.setValueAtTime(0.8, ctx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+  o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.52);
+  return true;
+}
+// Phase cues: vibration only by default, because a beep at a phase change is itself a small sudden stimulus.
+function phaseCue(freq, vib) {
+  const silent = !$('cueSilent') || $('cueSilent').checked;
+  if (!silent) playCue(freq);
+  buzz(vib);
+}
+function buzz(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* not available */ } }
+
+// ---------------------------------------------------------------- screen wake lock
+let wakeLock = null, wantWake = false;
+async function setWake(on) {
+  wantWake = on;
+  try {
+    if (on) {
+      if (!('wakeLock' in navigator)) { $('wakeNote').textContent = 'Questo browser non può tenere lo schermo acceso: disattiva il blocco schermo nelle impostazioni del telefono.'; return; }
+      if (!wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+      $('wakeNote').textContent = '';
+    } else if (wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch (e) { $('wakeNote').textContent = 'Schermo sempre acceso non riuscito: ' + e.message; }
+}
+
+// ---------------------------------------------------------------- guided calibration
+const PROTOCOL_BASE = [
+  { id: 'rest1', title: 'Riposo seduto', s: 300, text: 'Siediti con la schiena appoggiata. Il braccio con il sensore resta fermo sulla gamba o sul tavolo. Respira normalmente, non usare il telefono: guarda un punto davanti a te.' },
+  { id: 'breath', title: 'Respirazione guidata', s: 120, pacer: true, text: 'Segui il cerchio: inspira mentre si allarga, espira mentre si restringe (5 secondi e 5 secondi). Resta fermo.' },
+  { id: 'rec1', title: 'Pausa seduto', s: 90, text: 'Respira come vuoi, fermo.' },
+  { id: 'stand', title: 'In piedi, fermo', s: 90, rate: true, text: 'Alzati e resta in piedi fermo, braccia lungo i fianchi.' },
+  { id: 'rec2', title: 'Siediti', s: 120, text: 'Siediti di nuovo, fermo, respira come vuoi.' },
+  { id: 'math', title: 'Calcolo a mente, a tempo', s: 150, tempo: 4, rate: true, text: 'Parti da 1022 e togli 13 di continuo (1009, 996, ...), a mente. Un numero ogni volta che il punto arancione si accende (ogni 4 secondi): tieni il ritmo. Se sbagli, ricomincia da 1022. Resta seduto, braccio fermo.' },
+  { id: 'rec3', title: 'Siediti, respira', s: 120, text: 'Fermo. Respira come vuoi.' },
+  { id: 'startle', title: 'Stimoli improvvisi', s: 180, startle: 2, rate: true, text: 'Siediti fermo, con il volume che hai provato prima. Sentirai due volte un suono improvviso, non sai quando. Se ti spaventi, premi il pulsante con l\'altra mano, oppure lascia stare: i suoni sono segnati comunque.' },
+  { id: 'rec4', title: 'Pausa', s: 120, text: 'Fermo, respira come vuoi.' },
+  { id: 'walk', title: 'Camminata', s: 120, rate: true, text: 'Cammina a passo normale, avanti e indietro. Tieni il telefono in mano o in tasca con lo schermo acceso.' },
+  { id: 'rec5', title: 'Siediti', s: 120, text: 'Siediti, fermo, respira come vuoi. Ultima fase.' }
+];
+// Video path (v1.4): stimuli are played on another screen (the laptop), the page only times the phases and writes the markers.
+// 'content' goes into the phase marker so the analysis knows what was shown without relying on the title.
+const VIDEO_TEXT = n => `Il video ${n} è sul portatile, pronto, a schermo intero. Avvialo appena senti il segnale e guardalo fino alla fine (3 minuti). Il braccio con il sensore resta fermo sulla gamba o sul tavolo; con l'altra mano non fare altro. Non guardare il telefono.`;
+const PROTOCOL_VIDEO = [
+  { id: 'rest1', title: 'Riposo seduto', s: 240, text: 'Siediti con la schiena appoggiata, il braccio con il sensore fermo. Respira normalmente, non usare il telefono: guarda un punto davanti a te. Serve a misurare il tuo livello di partenza.' },
+  { id: 'vid1', title: 'Video 1 (3 minuti)', s: 180, rate: true, felt: true, content: 'neutral', text: VIDEO_TEXT(1) },
+  { id: 'rec1', title: 'Pausa seduto', s: 120, text: 'Schermo del portatile spento o fermo. Respira come vuoi, fermo.' },
+  { id: 'vid2', title: 'Video 2 (3 minuti)', s: 180, rate: true, felt: true, content: 'fear', text: VIDEO_TEXT(2) },
+  { id: 'rec2', title: 'Pausa seduto', s: 150, text: 'Schermo del portatile fermo. Respira come vuoi, fermo. Il corpo può restare attivato qualche minuto dopo: è normale.' },
+  { id: 'vid3', title: 'Video 3 (3 minuti)', s: 180, rate: true, felt: true, content: 'arousing', text: VIDEO_TEXT(3) },
+  { id: 'rec3', title: 'Pausa seduto', s: 150, text: 'Schermo del portatile fermo. Respira come vuoi, fermo. Ultima fase.' }
+];
+// Verifica stati: one pass through every activity state, in the order that makes the transitions readable. The phase ids are
+// letters and digits only, like the other paths, so the analysis scripts read the markers the same way.
+const PROTOCOL_STATES = [
+  { id: 'ststill', title: 'Seduto fermo', s: 90, text: 'Siediti con il braccio destro appoggiato e fermo. Stato atteso: STILL_REST.' },
+  { id: 'stdesk', title: 'Scrivania e gesti', s: 60, text: 'Resta seduto, ma usa il mouse, scrivi, o gesticola a tratti con il braccio destro. Stato atteso: DESK_OR_GESTURE.' },
+  { id: 'ststand', title: 'Alzati in piedi', s: 120, text: 'Alzati adesso e resta in piedi, fermo. Il battito sale e resta alto circa 90 secondi. Stato atteso: TRANSITION_HOLD.' },
+  { id: 'stsit', title: 'Siediti di nuovo', s: 60, text: 'Siediti, braccio fermo. Anche sedersi è un cambio di postura.' },
+  { id: 'stwalk', title: 'Camminata continua', s: 60, text: 'Cammina a passo normale, avanti e indietro. Stato atteso: LOCOMOTION.' },
+  { id: 'strec', title: 'Recupero seduto', s: 120, text: 'Siediti subito, braccio fermo. Stato atteso: RECOVERY finché il battito non scende, poi STILL_REST.' }
+];
+const protocolOf = v => v === 'video' ? PROTOCOL_VIDEO : v === 'states' ? PROTOCOL_STATES : PROTOCOL_BASE;
+let PROTOCOL = PROTOCOL_BASE;
+const phaseSeconds = ph => Math.max(2, Math.round(ph.s / FAST));
+const proto = { active: false, i: -1, start: 0, end: 0, bursts: [], lastBurstTs: null };
+
+function startProtocol() {
+  if (rec.id === null) { log('Collega prima il sensore (o avvia la prova senza sensore): il percorso scrive i marker nella registrazione.'); return; }
+  if (proto.active) return;
+  audio(); setWake(true); $('wakeChk').checked = true;
+  proto.active = true;
+  PROTOCOL = protocolOf($('protoSel').value);
+  const ctxData = readContext();
+  addMarker('cal:context', 'context', ctxData);
+  addMarker('cal:start', 'phase', { note: $('protoNote').value.trim() || null, path: $('protoSel').value, fast: FAST > 1 ? FAST : undefined });
+  $('protoRun').style.display = ''; $('protoStartBtn').disabled = true; $('protoNote').disabled = true; $('protoSel').disabled = true; $('ctxBox').style.opacity = '0.5';
+  log('Percorso di calibrazione avviato.');
+  enterPhase(0);
+}
+
+function enterPhase(i) {
+  if (i >= PROTOCOL.length) { finishProtocol(false); return; }
+  const ph = PROTOCOL[i], secs = phaseSeconds(ph);
+  proto.i = i; proto.start = Date.now(); proto.end = proto.start + secs * 1000;
+  // Sudden sounds: ph.startle of them, one in each equal slice of the middle 70% of the phase, never at the edges.
+  proto.bursts = [];
+  if (ph.startle) {
+    const n = ph.startle, from = 0.15, to = 0.85, slice = (to - from) / n;
+    for (let k = 0; k < n; k++) proto.bursts.push({ n: k + 1, at: proto.start + (from + slice * (k + 0.15 + 0.7 * Math.random())) * secs * 1000, done: false });
+  }
+  addMarker(`cal:${ph.id}:start`, 'phase', { phase: ph.id, content: ph.content || undefined, planned_s: secs, cue: $('cueSilent').checked ? 'vibration' : 'beep+vibration' });
+  phaseCue(i === 0 ? 523 : 660, i === 0 ? [150] : [120, 60, 120]);
+  $('pacer').style.display = ph.pacer ? '' : 'none';
+  $('tempoDot').style.display = ph.tempo ? '' : 'none';
+  if (ph.tempo) $('tempoDot').style.animationDuration = ph.tempo + 's';
+  $('vidRow').style.display = ph.content ? '' : 'none';
+  if (ph.content) $('vidContent').value = ph.content;
+  $('feltBtn').style.display = (ph.startle || ph.felt) ? '' : 'none';
+  $('feltBtn').textContent = ph.felt ? 'Ho sentito una reazione (con l\'altra mano)' : 'Mi sono spaventato (con l\'altra mano)';
+  showRating(i);
+  renderProto();
+}
+
+function leavePhase(reason) {
+  const ph = PROTOCOL[proto.i];
+  $('rateRow').style.display = 'none';
+  if (ph) addMarker(`cal:${ph.id}:end`, 'phase', { phase: ph.id, reason });
+}
+
+function protoTick() {
+  if (!proto.active) return;
+  const now = Date.now(), ph = PROTOCOL[proto.i];
+  if (ph && ph.startle) {
+    for (const b of proto.bursts) {
+      if (b.done || now < b.at) continue;
+      b.done = true;
+      const played = playBurst();
+      proto.lastBurstTs = Date.now();
+      addMarker('cal:startle:burst', 'stimulus', { played, n: b.n, of: ph.startle });
+      log(played ? `Stimolo sonoro ${b.n} di ${ph.startle} riprodotto.` : 'Stimolo sonoro non riproducibile in questo browser.');
+    }
+  }
+  if (now >= proto.end) { leavePhase('done'); syncSoon(); enterPhase(proto.i + 1); return; }
+  renderProto();
+}
+
+function renderProto() {
+  const ph = PROTOCOL[proto.i]; if (!ph) return;
+  const left = Math.max(0, (proto.end - Date.now()) / 1000), total = phaseSeconds(ph);
+  $('protoStep').textContent = `Fase ${proto.i + 1} di ${PROTOCOL.length}`;
+  $('protoTitle').textContent = ph.title;
+  $('protoText').textContent = ph.text;
+  $('protoClock').textContent = mmss(left);
+  $('protoBar').style.width = `${(1 - left / total) * 100}%`;
+  $('protoStatus').textContent = `Fase ${proto.i + 1}/${PROTOCOL.length}`;
+}
+
+function finishProtocol(aborted) {
+  if (!proto.active) return;
+  if (aborted) leavePhase('aborted');
+  addMarker(aborted ? 'cal:abort' : 'cal:end', 'phase');
+  proto.active = false; proto.i = -1;
+  $('protoRun').style.display = 'none'; $('protoStartBtn').disabled = false; $('protoNote').disabled = false; $('protoSel').disabled = false; $('ctxBox').style.opacity = '';
+  $('protoStatus').textContent = aborted ? 'Interrotto' : 'Completato';
+  log(aborted ? 'Percorso interrotto.' : 'Percorso completato. Puoi ripeterlo più tardi, per esempio dopo il caffè.');
+  if (!aborted) phaseCue(523, [200, 80, 200]);
+  syncSoon();
+}
+
+// ---------------------------------------------------------------- check-ins (random "how are you now")
+const CI_DEFAULTS = { enabled: true, minMin: 40, maxMin: 90, fromH: 8, toH: 22, nextAt: 0 };
+const ACTIVITIES = ['seduto', 'in piedi', 'camminando', 'parlando', 'mangiando o bevendo', 'al telefono o al pc', 'altro'];
+const VALENCE = [[-2, '-2'], [-1, '-1'], [0, '0'], [1, '+1'], [2, '+2']];
+const AROUSAL = [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']];
+const ci = { open: false, openedAt: 0, valence: null, arousal: null, manual: false, eventId: null };
+
+function ciCfg() { return store.get(SETTINGS_KEYS.checkin, CI_DEFAULTS); }
+function ciSave(c) { store.set(SETTINGS_KEYS.checkin, c); }
+
+function pickNextCheckin(from) {
+  const c = ciCfg();
+  let t = from + (CI_TEST_S ? CI_TEST_S * 1000 : (c.minMin + Math.random() * Math.max(0, c.maxMin - c.minMin)) * 60000);
+  const h = new Date(t).getHours();
+  if (!CI_TEST_S && (h < c.fromH || h >= c.toH)) {
+    const d = new Date(t); if (h >= c.toH) d.setDate(d.getDate() + 1);
+    d.setHours(c.fromH, Math.floor(Math.random() * 30), 0, 0); t = d.getTime();
+  }
+  c.nextAt = t; ciSave(c);
+  return t;
+}
+
+function scaleButtons(container, items, key) {
+  container.textContent = '';
+  for (const [value, label] of items) {
+    const b = el('button', label, 'btn-secondary scale-btn');
+    b.type = 'button';
+    b.onclick = () => {
+      ci[key] = value;
+      for (const x of container.children) x.classList.remove('picked');
+      b.classList.add('picked');
+      $('ciSave').disabled = ci.valence === null || ci.arousal === null;
+    };
+    container.appendChild(b);
+  }
+}
+
+function openCheckin(manual, triggerEvt) {
+  if (ci.open) return;
+  if (rec.id === null) { log('Il check-in si salva nella registrazione: collega prima il sensore.'); return; }
+  ci.open = true; ci.manual = !!manual; ci.openedAt = Date.now(); ci.valence = null; ci.arousal = null;
+  ci.eventId = triggerEvt ? triggerEvt.id : null;
+  $('ciTitle').textContent = triggerEvt ? 'Il corpo ha avuto uno scatto: come stai?' : 'Come stai in questo momento?';
+  const info = $('ciTriggerInfo');
+  if (triggerEvt) { info.style.display = ''; info.textContent = `${String(triggerEvt.trigger_type).toUpperCase()} (${triggerEvt.activity_state || 'STILL_REST'}) · ${triggerEvt.trigger_bpm} BPM (base ${triggerEvt.baseline_bpm}) · rMSSD ${triggerEvt.trigger_rmssd} ms`; }
+  else info.style.display = 'none';
+  scaleButtons($('valRow'), VALENCE, 'valence'); scaleButtons($('aroRow'), AROUSAL, 'arousal');
+  $('ciSave').disabled = true; $('ciNote').value = '';
+  $('checkinModal').hidden = false;
+  if (!manual && !triggerEvt) { playCue(784); buzz([250, 100, 250]); }
+}
+
+function closeCheckin(saved, reason) {
+  if (!ci.open) return;
+  if (saved) {
+    const data = { valence: ci.valence, arousal: ci.arousal, activity: $('actSel').value, note: $('ciNote').value.trim() || null, manual: ci.manual, linked_event_id: ci.eventId, answer_delay_s: Math.round((Date.now() - ci.openedAt) / 1000) };
+    addMarker(`checkin v${ci.valence} a${ci.arousal} ${data.activity}`, 'checkin', data);
+    log(`Check-in salvato: ${data.activity}, piacevolezza ${ci.valence}, attivazione ${ci.arousal}.`);
+    if (ci.eventId) {
+      const events = loadEvents(), ev = events.find(x => x.id === ci.eventId);
+      if (ev) { ev.user_valence = ci.valence; ev.user_arousal = ci.arousal; ev.user_activity = data.activity; ev.user_reflection = data.note; ev.status = 'completed'; storeEvents(events); renderEvents(); }
+    }
+  } else if (!ci.manual) {
+    addMarker('checkin:' + reason, 'checkin', { skipped: reason, linked_event_id: ci.eventId });
+  }
+  ci.open = false; ci.eventId = null; $('checkinModal').hidden = true;
+  if (!ci.manual) {
+    if (reason === 'later') { const c = ciCfg(); c.nextAt = Date.now() + (CI_TEST_S ? CI_TEST_S * 1000 : 10 * 60000); ciSave(c); }
+    else pickNextCheckin(Date.now());
+  }
+  renderCheckinInfo();
+}
+
+function checkinTick() {
+  const c = ciCfg();
+  if (!c.enabled || ci.open || proto.active || rec.id === null || !connected) return;
+  if (!c.nextAt) { pickNextCheckin(Date.now()); return; }
+  if (Date.now() >= c.nextAt && !document.hidden) openCheckin(false);
+}
+
+function renderCheckinInfo() {
+  const c = ciCfg();
+  $('ciInfo').textContent = !c.enabled ? 'Check-in spenti.' :
+    (c.nextAt ? `Prossimo check-in intorno alle ${clock(c.nextAt)} (se la pagina è aperta e il sensore collegato).` : 'Il primo check-in viene programmato quando colleghi il sensore.');
+}
+
+// ---------------------------------------------------------------- upload to GitHub
+const SYNC_DEFAULTS = { owner: '', repo: '', branch: 'main', folder: 'data', token: '', auto: true };
+const sync = { busy: false, lastOk: null, lastErr: null, pendingRows: 0 };
+function syncCfg() { return store.get(SETTINGS_KEYS.sync, SYNC_DEFAULTS); }
+function syncReady(c) { return !!(c.owner && c.repo && c.token); }
+
+function toB64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = ''; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(bin);
+}
+
+async function ghPut(c, path, text, message) {
+  let res;
+  try {
+    res = await fetch(`https://api.github.com/repos/${encodeURIComponent(c.owner)}/${encodeURIComponent(c.repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + c.token, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, content: toB64(text), branch: c.branch || 'main' })
+    });
+  } catch (e) { const err = new Error('rete non raggiungibile'); err.retry = true; throw err; }
+  if (res.status === 200 || res.status === 201) return 'ok';
+  if (res.status === 422) return 'exists';
+  let hint = '';
+  if (res.status === 401) hint = ' (token non valido o scaduto)';
+  else if (res.status === 403) hint = ' (il token non ha il permesso Contents: lettura e scrittura, oppure limite di richieste)';
+  else if (res.status === 404) hint = ' (repository o ramo non trovati, oppure il token non lo vede)';
+  const err = new Error(`GitHub ha risposto ${res.status}${hint}`); err.retry = res.status >= 500 || res.status === 429; throw err;
+}
+
+function syncState(sid) { const all = store.get(SETTINGS_KEYS.syncState, {}); return Object.assign({ rows: 0, markers: 0, seq: 0, evSig: '' }, all[sid] || {}); }
+function syncStateSave(sid, st) { const all = store.get(SETTINGS_KEYS.syncState, {}); all[sid] = st; store.set(SETTINGS_KEYS.syncState, all); }
+
+function eventsFor(meta) {
+  const from = meta.startedAt - 1000, to = (meta.lastTs || meta.startedAt) + 1000;
+  return loadEvents().filter(e => { const t = new Date(e.timestamp).getTime(); return t >= from && t <= to; });
+}
+
+async function uploadSession(meta, rows, markers, final) {
+  const c = syncCfg();
+  if (!syncReady(c)) return 'non configurato';
+  const st = syncState(meta.id);
+  const newRows = rows.slice(st.rows), newMarkers = markers.slice(st.markers), events = eventsFor(meta);
+  const evSig = JSON.stringify(events.map(e => [e.id, !!e.response]));
+  if (!newRows.length && !newMarkers.length && evSig === st.evSig && !final) return 'niente di nuovo';
+  const base = {
+    format: 'body-activated-diary/ppi-chunk', format_version: 1, engine_version: ENGINE_VERSION,
+    session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device, columns: COLUMNS,
+    row_offset: st.rows, marker_offset: st.markers, samples: newRows, markers: newMarkers, events, final: !!final
+  };
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const seq = st.seq + 1 + attempt;
+    const payload = Object.assign({}, base, { seq, uploaded_at: new Date().toISOString() });
+    if (seq === 1) payload.config = engine.config;
+    const path = `${c.folder || 'data'}/${meta.id}/${String(seq).padStart(5, '0')}.json`;
+    const r = await ghPut(c, path, JSON.stringify(payload), `data ${meta.id} #${seq}`);
+    if (r === 'ok') {
+      syncStateSave(meta.id, { rows: st.rows + newRows.length, markers: st.markers + newMarkers.length, seq, evSig });
+      return `parte ${seq} caricata (${newRows.length} campioni)`;
+    }
+  }
+  throw new Error('non trovo un nome libero per il file: controlla la cartella nel repository');
+}
+
+// Raw PPG frames go to their own files (ppg_00001.json, ...) next to the PPI chunks, at most 1500 frames each.
+async function uploadPpg(meta, frames, final) {
+  const c = syncCfg();
+  if (!syncReady(c) || !frames.length) return null;
+  const key = meta.id + ':ppg';
+  let st = syncState(key), sent = 0, msg = null;
+  for (let round = 0; round < 4 && st.rows < frames.length; round++) {
+    const part = frames.slice(st.rows, st.rows + 1500);
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const seq = st.seq + 1 + attempt;
+      const payload = {
+        format: 'body-activated-diary/ppg-chunk', format_version: 1, engine_version: ENGINE_VERSION,
+        session_id: meta.id, started_at: new Date(meta.startedAt).toISOString(), device: meta.device,
+        rate_hz: 55, channels: ['c0', 'c1', 'c2', 'ambient'], note: PPG_FORMAT_NOTE,
+        frame_offset: st.rows, frames: part, seq, uploaded_at: new Date().toISOString(), final: !!final
+      };
+      const path = `${c.folder || 'data'}/${meta.id}/ppg_${String(seq).padStart(5, '0')}.json`;
+      const r = await ghPut(c, path, JSON.stringify(payload), `ppg ${meta.id} #${seq}`);
+      if (r === 'ok') { st = { rows: st.rows + part.length, markers: 0, seq, evSig: '' }; syncStateSave(key, st); sent += part.length; msg = `PPG parte ${seq} caricata`; break; }
+      if (attempt === 5) throw new Error('non trovo un nome libero per il file PPG');
+    }
+  }
+  return msg ? `${msg} (${sent} frame)` : null;
+}
+
+async function syncNow(final) {
+  const c = syncCfg();
+  if (!syncReady(c)) { renderSyncStatus(); return; }
+  if (sync.busy || rec.id === null) return;
+  sync.busy = true;
+  try {
+    flushRecording();
+    const msg = await uploadSession(sessionMeta(), rec.rows, rec.markers, final);
+    const pm = await uploadPpg(sessionMeta(), ppgRec.frames, final);
+    if (pm) log('Salvataggio su GitHub: ' + pm);
+    sync.lastOk = Date.now(); sync.lastErr = null; sync.pendingRows = 0;
+    if (!/^niente/.test(msg)) log('Salvataggio su GitHub: ' + msg);
+  } catch (e) {
+    sync.lastErr = e.message;
+    log('Salvataggio su GitHub non riuscito: ' + e.message + '. Riprovo più tardi, i dati restano nel browser.');
+  } finally { sync.busy = false; renderSyncStatus(); }
+}
+function syncSoon() { setTimeout(() => syncNow(false), 500); }
+
+async function syncStored(s) {
+  if (!rec.db) return;
+  try {
+    const rows = s.id === rec.id ? rec.rows : await loadSessionRows(s.id);
+    const msg = await uploadSession(s.id === rec.id ? sessionMeta() : s, rows, s.markers || [], true);
+    log(`Sessione ${new Date(s.startedAt).toLocaleString()}: ${msg}`);
+    const pf = s.id === rec.id ? ppgRec.frames : await loadSessionRows(s.id + ':ppg');
+    const pm = await uploadPpg(s.id === rec.id ? sessionMeta() : s, pf, true);
+    if (pm) log(pm);
+  } catch (e) { log('Caricamento non riuscito: ' + e.message); }
+  renderSyncStatus();
+}
+
+async function syncTest() {
+  const c = syncCfg();
+  if (!syncReady(c)) { $('syncStatus').textContent = 'Compila proprietario, repository e token.'; return; }
+  $('syncStatus').textContent = 'Provo a scrivere un file di prova...';
+  try {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const r = await ghPut(c, `${c.folder || 'data'}/_test/${stamp}.json`, JSON.stringify({ test: true, at: new Date().toISOString() }), 'test upload');
+    $('syncStatus').textContent = r === 'ok' ? 'Prova riuscita: il file è nel repository.' : 'Il file di prova esisteva già.';
+  } catch (e) { $('syncStatus').textContent = 'Prova non riuscita: ' + e.message; }
+}
+
+function renderSyncStatus() {
+  const c = syncCfg(), box = $('syncStatus');
+  if (!syncReady(c)) { box.textContent = 'Non configurato: i dati restano solo nel browser (esportali a mano).'; return; }
+  const parts = [];
+  if (sync.lastOk) parts.push(`ultimo caricamento riuscito alle ${clock(sync.lastOk)}`);
+  if (rec.id !== null) {
+    const st = syncState(rec.id), waiting = rec.rows.length - st.rows;
+    parts.push(waiting > 0 ? `${waiting} campioni ancora da caricare` : 'tutto caricato');
+  }
+  if (sync.lastErr) parts.push('ultimo errore: ' + sync.lastErr);
+  box.textContent = parts.length ? parts.join(' · ') : "Pronto. Il primo caricamento parte poco dopo l'inizio della registrazione.";
+}
+
+// ---------------------------------------------------------------- simulated sensor (to try the page without the Polar)
+let sim = null;
+function startSim() {
+  if (connected || sim) return;
+  newSessionIfNeeded('Sensore simulato');
+  sim = { boostUntil: 0, timer: null };
+  connected = true; $('connectBtn').disabled = true; $('simBtn').disabled = true; $('simBoostBtn').style.display = '';
+  log('Sensore simulato avviato: dati finti, solo per provare la pagina.');
+  const beat = () => {
+    if (!sim) return;
+    const now = Date.now(), up = now < sim.boostUntil, bpm = up ? 90 : 68, rm = up ? 14 : 55;
+    const ppi = Math.max(320, Math.min(1900, Math.round(60000 / bpm + gauss() * rm / Math.SQRT2)));
+    const rows = [{ hr: Math.round(bpm), ppi, err: 5, flags: 6 }];
+    stampBatch(rows, now); ingestRows(rows);
+    sim.timer = setTimeout(beat, ppi);
+  };
+  beat();
+  refresh();
+}
+function stopSim() { if (sim) { clearTimeout(sim.timer); sim = null; connected = false; $('simBoostBtn').style.display = 'none'; } }
+
+// ---------------------------------------------------------------- session end
+function newSessionIfNeeded(deviceName) {
+  if (rec.id === null) {
+    resetEngines(); lastStampTs = null;
+    startSession(deviceName);
+    const c = ciCfg(); c.nextAt = 0; ciSave(c); renderCheckinInfo();
+  }
+}
+
+async function endSession() {
+  if (rec.id === null) { log('Nessuna sessione aperta.'); return; }
+  if (!confirm('Chiudere la sessione? Il sensore viene scollegato e i dati rimasti vengono caricati.')) return;
+  if (proto.active) finishProtocol(true);
+  if (ci.open) closeCheckin(false, 'session_end');
+  wantConnected = false; clearTimeout(reconnectTimer);
+  stopSim();
+  try { if (btDevice && btDevice.gatt.connected) btDevice.gatt.disconnect(); } catch (e) { /* already gone */ }
+  connected = false;
+  addMarker('session:end', 'system');
+  await syncNow(true);
+  flushRecording();
+  log(`Sessione chiusa (${rec.rows.length} campioni). Puoi esportarla dall'elenco in fondo.`);
+  rec.id = null;
+  $('connectBtn').disabled = false; $('simBtn').disabled = false;
+  renderSessions(); refresh();
+}
+
+// ---------------------------------------------------------------- context before the path, and self-rating after the hard phases
+const CTX_KEY = 'bad_ctx_v13';
+const CTX_OPTIONS = {
+  ctxPlace: [['braccio_sx_alto', 'Parte alta del braccio, sinistro'], ['braccio_dx_alto', 'Parte alta del braccio, destro'], ['avambraccio_sx', 'Avambraccio sinistro'], ['avambraccio_dx', 'Avambraccio destro'], ['polso_sx', 'Polso sinistro'], ['polso_dx', 'Polso destro'], ['altro', 'Altro']],
+  ctxCaf: [['no', 'Niente nelle ultime 3 ore'], ['caffe', 'Caffè nelle ultime 3 ore'], ['altro', 'Altro stimolante (tè, energy, nicotina)']],
+  ctxTired: [['nd', 'Non lo so'], ['1', 'Riposato'], ['2', 'Un po\' stanco'], ['3', 'Stanco'], ['4', 'Molto stanco']],
+  ctxSleep: [['nd', 'Non lo so'], ['<5', 'Meno di 5 ore'], ['5-6', '5-6 ore'], ['6-7', '6-7 ore'], ['7-8', '7-8 ore'], ['>8', 'Più di 8 ore']],
+  ctxVol: [['', 'Non ancora provato'], ['non_sentito', 'Non l\'ho sentito'], ['basso', 'Basso'], ['medio', 'Medio'], ['alto', 'Alto'], ['fastidioso', 'Fastidioso']]
+};
+function readContext() {
+  const d = {};
+  for (const id of Object.keys(CTX_OPTIONS)) d[id.slice(3).toLowerCase()] = $(id).value || null;
+  d.cue_silent = $('cueSilent').checked;
+  const saved = store.get(CTX_KEY, {}); Object.assign(saved, d); store.set(CTX_KEY, saved);
+  return { placement: d.place, caffeine: d.caf, sleep: d.sleep, tired_now: d.tired, volume_felt: d.vol, cue_silent: d.cue_silent };
+}
+function initContext() {
+  const saved = store.get(CTX_KEY, {});
+  for (const [id, opts] of Object.entries(CTX_OPTIONS)) {
+    const sel = $(id);
+    for (const [v, label] of opts) sel.appendChild(new Option(label, v));
+    const k = id.slice(3).toLowerCase();
+    if (saved[k] != null && id !== 'ctxVol' && id !== 'ctxCaf' && id !== 'ctxTired') sel.value = saved[k];   // volume, coffee and tiredness are asked again each time
+  }
+  if (saved.cue_silent === false) $('cueSilent').checked = false;
+  $('volTestBtn').onclick = () => { const ok = playTestTone(); log(ok ? 'Tono di prova riprodotto. Regola il volume e scegli come lo senti.' : 'Audio non disponibile in questo browser.'); };
+}
+
+function showRating(i) {
+  const prev = PROTOCOL[i - 1];
+  const row = $('rateRow');
+  if (!prev || !prev.rate) { row.style.display = 'none'; return; }
+  const vid = !!prev.felt;
+  $('rateLbl').textContent = vid ? `Voto al video che hai appena visto: quanto ti ha attivato? Da 1, calmo, a 5, molto attivato. Con l'altra mano, serve per leggere i dati.` : `Quanto eri attivato nella fase appena finita (${prev.title.toLowerCase()})? Da 1, calmo, a 5, molto attivato. Facoltativo, con l'altra mano.`;
+  row.classList.toggle('attn', vid);
+  if (vid) buzz(60);
+  const box = $('rateBtns'); box.textContent = '';
+  for (const n of [1, 2, 3, 4, 5]) {
+    const b = el('button', String(n), 'btn-secondary scale-btn'); b.type = 'button';
+    b.onclick = () => {
+      addMarker('cal:rating', 'rating', { phase: prev.id, arousal: n });
+      for (const x of box.children) x.classList.remove('picked');
+      b.classList.add('picked'); buzz(30);
+    };
+    box.appendChild(b);
+  }
+  row.style.display = '';
+}
+
+// ---------------------------------------------------------------- wiring for the new panels
+function initV13() {
+  // calibration
+  const renderProtoList = () => {
+    const P = protocolOf($('protoSel').value);
+    const list = $('protoList'); list.textContent = '';
+    P.forEach(p => list.appendChild(el('li', `${p.title} (${mmss(p.s)})`)));
+    $('protoTotal').textContent = `${Math.round(P.reduce((a, p) => a + p.s, 0) / 60)} minuti circa`;
+  };
+  $('protoSel').onchange = renderProtoList; renderProtoList();
+  $('protoStartBtn').onclick = startProtocol;
+  $('protoSkipBtn').onclick = () => { if (!proto.active) return; leavePhase('skipped'); enterPhase(proto.i + 1); };
+  $('protoStopBtn').onclick = () => { if (proto.active && confirm('Interrompere il percorso?')) finishProtocol(true); };
+  $('vidContent').onchange = () => { const cur = PROTOCOL[proto.i]; if (cur && cur.content) { addMarker('cal:video:content', 'stimulus', { phase: cur.id, content: $('vidContent').value, planned: cur.content }); log('Segnato cosa guardi: ' + $('vidContent').selectedOptions[0].textContent + '.'); } };
+  $('feltBtn').onclick = () => {
+    const cur = PROTOCOL[proto.i];
+    if (cur && cur.felt) { addMarker('cal:video:felt', 'stimulus', { phase: cur.id, since_phase_s: Math.round((Date.now() - proto.start) / 100) / 10 }); log('Segnata una reazione.'); buzz(40); return; }
+    const since = proto.lastBurstTs ? Math.round((Date.now() - proto.lastBurstTs) / 100) / 10 : null;
+    addMarker('cal:startle:felt', 'stimulus', { since_burst_s: since });
+    log('Segnato: ti sei spaventato.'); buzz(40);
+  };
+  initContext();
+  $('capBtn').onclick = checkCapabilities;
+  $('accBtn').onclick = runAccTest;
+  $('ppgBtn').onclick = runPpgTest;
+  $('ppgChk').checked = store.get(PPG_KEY, false);
+  $('ppgChk').onchange = () => { store.set(PPG_KEY, $('ppgChk').checked); if (connected) setPpgRec($('ppgChk').checked).catch(err => log('PPG grezzo: ' + err.message)); };
+  $('accChk').checked = store.get(ACC_KEY, true);
+  $('accChk').onchange = () => { store.set(ACC_KEY, $('accChk').checked); if (connected) setAcc($('accChk').checked).catch(err => log('Accelerometro: ' + err.message)); };
+  $('capCopyBtn').onclick = async () => { try { await navigator.clipboard.writeText($('capOut').textContent); log('Testo copiato.'); } catch (e) { log('Copia non riuscita: seleziona il testo a mano.'); } };
+  setInterval(protoTick, 250);
+
+  // check-in
+  const c = ciCfg();
+  $('ciEnabled').checked = c.enabled; $('ciMin').value = c.minMin; $('ciMax').value = c.maxMin; $('ciFrom').value = c.fromH; $('ciTo').value = c.toH;
+  const saveCi = () => {
+    const x = ciCfg();
+    x.enabled = $('ciEnabled').checked;
+    x.minMin = Math.max(1, Number($('ciMin').value) || 40);
+    x.maxMin = Math.max(x.minMin, Number($('ciMax').value) || 90);
+    x.fromH = Math.min(23, Math.max(0, Number($('ciFrom').value) || 0));
+    x.toH = Math.min(24, Math.max(1, Number($('ciTo').value) || 22));
+    x.nextAt = 0; ciSave(x); renderCheckinInfo();
+  };
+  for (const id of ['ciEnabled', 'ciMin', 'ciMax', 'ciFrom', 'ciTo']) $(id).onchange = saveCi;
+  for (const a of ACTIVITIES) $('actSel').appendChild(new Option(a, a));
+  $('ciNowBtn').onclick = () => openCheckin(true);
+  $('ciSave').onclick = () => closeCheckin(true);
+  $('ciLater').onclick = () => closeCheckin(false, 'later');
+  $('ciSkip').onclick = () => closeCheckin(false, 'skipped');
+  renderCheckinInfo();
+
+  // sync
+  const s = syncCfg();
+  $('ghOwner').value = s.owner; $('ghRepo').value = s.repo; $('ghBranch').value = s.branch; $('ghFolder').value = s.folder; $('ghToken').value = s.token; $('ghAuto').checked = s.auto;
+  const saveSync = () => {
+    store.set(SETTINGS_KEYS.sync, {
+      owner: $('ghOwner').value.trim(), repo: $('ghRepo').value.trim(), branch: $('ghBranch').value.trim() || 'main',
+      folder: $('ghFolder').value.trim().replace(/^\/+|\/+$/g, '') || 'data', token: $('ghToken').value.trim(), auto: $('ghAuto').checked
+    });
+    renderSyncStatus();
+  };
+  for (const id of ['ghOwner', 'ghRepo', 'ghBranch', 'ghFolder', 'ghToken', 'ghAuto']) $(id).onchange = saveSync;
+  $('ghTestBtn').onclick = () => { saveSync(); syncTest(); };
+  $('ghNowBtn').onclick = () => { saveSync(); if (rec.id === null) $('syncStatus').textContent = 'Nessuna sessione aperta.'; else syncNow(false); };
+  $('ghForgetBtn').onclick = () => { $('ghToken').value = ''; saveSync(); };
+  renderSyncStatus();
+  setInterval(() => { if (syncCfg().auto && rec.id !== null && connected) syncNow(false); }, 120000);
+
+  // session
+  $('simBtn').onclick = startSim;
+  $('simBoostBtn').onclick = () => { if (sim) { sim.boostUntil = Date.now() + 40000; addMarker('sim:stimulus', 'stimulus'); log('Simulazione: 40 secondi di attivazione.'); } };
+  $('endBtn').onclick = endSession;
+  $('wakeChk').onchange = () => setWake($('wakeChk').checked);
+  setInterval(() => { checkinTick(); renderSyncStatus(); }, 1000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { if (wantWake) setWake(true); checkinTick(); }
+  });
+}
+
+// ---------------------------------------------------------------- wiring
+function init() {
+  const sel = $('replaySource');
+  sel.appendChild(new Option('Recording file (choose on the right)', 'file'));
+  for (const k of Object.keys(SYNTH_SCENARIOS)) sel.appendChild(new Option('Synthetic · ' + SYNTH_SCENARIOS[k].label, k));
+  sel.value = 'sudden';
+  $('defaultsPre').textContent = JSON.stringify(DEFAULT_CONFIG, null, 2);
+
+  $('connectBtn').onclick = connect;
+  $('markerBtn').onclick = () => {
+    const label = $('markerInput').value.trim();
+    if (rec.id === null) { log('Connect the sensor first: markers belong to a recording.'); return; }
+    if (!label) return;
+    addMarker(label, 'manual');
+    $('markerInput').value = '';
+    log(`Marker added: ${label}`); refresh();
+  };
+  $('markerInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('markerBtn').click(); });
+  $('exportRecBtn').onclick = () => {
+    if (rec.id === null || !rec.rows.length) { log('Nothing recorded in this session yet.'); return; }
+    flushRecording();
+    download(`ppi_recording_${fileStamp(rec.startedAt)}.json`, buildPayload(sessionMeta(), rec.rows));
+    log(`Exported ${rec.rows.length} samples, ${rec.markers.length} markers.`);
+  };
+  $('exportJsonBtn').onclick = () => {
+    const events = loadEvents();
+    if (!events.length) { log('No events to export.'); return; }
+    download(`polar_diary_events_${new Date().toISOString().slice(0, 10)}.json`, events);
+    log(`Exported ${events.length} events.`);
+  };
+  $('clearStorageBtn').onclick = () => {
+    if (!confirm('Clear all stored events? Recordings are not touched.')) return;
+    localStorage.removeItem(EVENTS_KEY); renderEvents(); log('Stored events cleared.');
+  };
+  $('replayBtn').onclick = runReplay;
+  $('replayFile').onchange = async () => {
+    const f = $('replayFile').files[0];
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.zip')) { sel.value = 'file'; return; }
+    try {
+      $('replaySummary').textContent = 'Lettura dello ZIP e unione dei chunk...';
+      loadedZipSessions = await parseZipSessions(f);
+      const ids = Object.keys(loadedZipSessions);
+      for (let i = sel.options.length - 1; i >= 0; i--) if (sel.options[i].value.startsWith('zip:')) sel.remove(i);
+      for (const id of ids) { const p = loadedZipSessions[id]; sel.appendChild(new Option(`ZIP · ${id} (${p.samples.length} campioni, ${(p.markers || []).length} marker)`, 'zip:' + id)); }
+      $('batchZipBtn').style.display = ids.length ? '' : 'none'; $('exportMergedZipBtn').style.display = ids.length ? '' : 'none';
+      if (ids.length) sel.value = 'zip:' + ids[ids.length - 1];
+      $('replaySummary').textContent = ids.length ? `Caricate ${ids.length} sessioni da ${f.name}. Premi "Run replay" o "Confronta tutte le sessioni dello ZIP".` : 'Nessuna sessione trovata nello ZIP (cerco data/rec_.../NNNNN.json).';
+    } catch (e) { $('replaySummary').textContent = 'Errore lettura ZIP: ' + e.message; }
+  };
+  $('batchZipBtn').onclick = runBatchZipComparison;
+  $('exportMergedZipBtn').onclick = () => { if (Object.keys(loadedZipSessions).length) download('dataset_per_analisi.json', loadedZipSessions); };
+  $('windowBtn').onclick = () => { $('configBox').value = JSON.stringify(SHADOW_CONFIGS.find(x => x.id === 'finestra').cfg, null, 2); };
+  $('stateBtn').onclick = () => { $('configBox').value = JSON.stringify(SHADOW_CONFIGS.find(x => x.id === 'stati').cfg, null, 2); };
+  $('noiseBtn').onclick = () => { $('configBox').value = JSON.stringify(SHADOW_CONFIGS.find(x => x.id === 'rumore').cfg, null, 2); };
+  $('compatBtn').onclick = () => { $('configBox').value = JSON.stringify(V1_1_COMPAT_CONFIG, null, 2); };
+  $('resetCfgBtn').onclick = () => { $('configBox').value = '{}'; };
+  $('applyLiveBtn').onclick = () => {
+    try {
+      const { overrides, unknown } = readOverrides();
+      liveOverrides = overrides; resetEngines();
+      describeRules(); refresh();
+      log(`Live engine restarted with overrides ${JSON.stringify(overrides)}.` + (unknown.length ? ` Unknown keys ignored: ${unknown.join(', ')}.` : ''));
+    } catch (e) { log('Overrides not applied: ' + e.message); }
+  };
+
+  initV13();
+  describeRules(); renderEvents(); refresh();
+  openDb().then(db => { rec.db = db; renderSessions(); });
+  setInterval(refresh, 1000);
+  setInterval(flushRecording, 15000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) flushRecording(); });
+  window.addEventListener('pagehide', flushRecording);
+}
+init();
+  </script>
+</body>
+</html>
